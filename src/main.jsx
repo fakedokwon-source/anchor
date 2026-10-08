@@ -769,6 +769,16 @@ function App({
   const [selectedFriend, setSelectedFriend] =
     useState(null);
 
+  /*
+    Realtime mesaj handler'i useEffect içinde çalıştığı için
+    seçili sohbeti her zaman güncel tutuyoruz.
+  */
+  const selectedFriendRef = useRef(null);
+
+  useEffect(() => {
+    selectedFriendRef.current = selectedFriend;
+  }, [selectedFriend]);
+
   const [messages, setMessages] =
     useState([]);
 
@@ -907,24 +917,82 @@ function App({
      ONLINE STATUS
   ======================================================= */
 
+  const broadcastPresence = async (
+    userId,
+    isOnline,
+    lastSeen = new Date().toISOString()
+  ) => {
+    const channel =
+      presenceChannelRef.current;
+
+    if (!channel) {
+      return;
+    }
+
+    try {
+      const result =
+        await channel.send({
+          type: 'broadcast',
+          event: 'presence',
+          payload: {
+            user_id: userId,
+            is_online: isOnline,
+            last_seen: lastSeen
+          }
+        });
+
+      console.log(
+        'ANCHOR PRESENCE SENT:',
+        {
+          userId,
+          isOnline,
+          result
+        }
+      );
+    } catch (error) {
+      console.error(
+        'Presence broadcast error:',
+        error
+      );
+    }
+  };
+
+
   const updateOnlineStatus = async (
     userId,
     isOnline
   ) => {
+    const lastSeen =
+      new Date().toISOString();
+
     try {
-      await supabase
-        .from('profiles')
-        .update({
-          is_online: isOnline,
-          last_seen: new Date().toISOString()
-        })
-        .eq('id', userId);
+      const { error } =
+        await supabase
+          .from('profiles')
+          .update({
+            is_online: isOnline,
+            last_seen: lastSeen
+          })
+          .eq('id', userId);
+
+      if (error) {
+        console.error(
+          'Status update error:',
+          error
+        );
+      }
     } catch (error) {
       console.error(
         'Status update error:',
         error
       );
     }
+
+    await broadcastPresence(
+      userId,
+      isOnline,
+      lastSeen
+    );
   };
 
 
@@ -951,8 +1019,25 @@ function App({
         );
       }, 30000);
 
+    const handlePageHide = () => {
+      updateOnlineStatus(
+        userId,
+        false
+      );
+    };
+
+    window.addEventListener(
+      'pagehide',
+      handlePageHide
+    );
+
     return () => {
       clearInterval(heartbeat);
+
+      window.removeEventListener(
+        'pagehide',
+        handlePageHide
+      );
 
       updateOnlineStatus(
         userId,
@@ -1145,8 +1230,44 @@ function App({
 
 
   /* =======================================================
+     UNREAD MESSAGE POLLING
+  ======================================================= */
+
+  useEffect(() => {
+    if (!session?.user?.id) {
+      return;
+    }
+
+    const userId = session.user.id;
+
+    /*
+      Broadcast mesajı kaçırılırsa bile okunmamış sayaç
+      veritabanındaki gerçek read_at durumundan güncellenir.
+      Böylece sohbet penceresi AÇIK DEĞİLKEN arkadaşın
+      yanında 1, 2, 10... şeklinde gerçek sayı görünür.
+    */
+    const refreshUnread = () => {
+      loadUnreadCounts(userId);
+    };
+
+    refreshUnread();
+
+    const unreadTimer = window.setInterval(
+      refreshUnread,
+      1000
+    );
+
+    return () => {
+      window.clearInterval(unreadTimer);
+    };
+  }, [session?.user?.id]);
+
+
+  /* =======================================================
      REALTIME
   ======================================================= */
+
+  const presenceChannelRef = useRef(null);
 
   useEffect(() => {
     if (!session?.user?.id) {
@@ -1156,100 +1277,287 @@ function App({
     const userId =
       session.user.id;
 
+    /*
+      Mesajlar: Supabase Broadcast kullanıyoruz.
+      Her kullanıcı kendi kanalını dinler.
+    */
+    const messageChannel =
+      supabase
+        .channel(
+          `anchor-user-${userId}`
+        )
+        .on(
+          'broadcast',
+          {
+            event: 'message'
+          },
+          async (payload) => {
+            console.log(
+              'ANCHOR BROADCAST MESSAGE:',
+              payload
+            );
 
-    const handleIncomingMessage =
-      async (payload) => {
-        const newMessage =
-          payload.new;
+            const newMessage =
+              payload?.payload;
 
-        if (!newMessage) {
-          return;
-        }
-
-        /*
-          Eski sistemde Buzz messages tablosuna
-          kaydedilmiş olabilir.
-
-          Yeni sistemde Buzz artık
-          buzz_events tablosunu kullanıyor.
-        */
-        if (
-          newMessage.message_type ===
-          'buzz'
-        ) {
-          triggerBuzz();
-          return;
-        }
-
-
-        if (
-          newMessage.receiver_id !== userId
-        ) {
-          return;
-        }
-
-
-        const incomingMessage = {
-          ...newMessage,
-          read_at:
-            newMessage.read_at ||
-            new Date().toISOString()
-        };
-
-
-        setMessages(
-          (current) => {
-            const exists =
-              current.some(
-                (message) =>
-                  message.id ===
-                  incomingMessage.id
-              );
-
-            if (exists) {
-              return current;
+            if (!newMessage) {
+              return;
             }
 
-            return [
-              ...current,
-              incomingMessage
-            ];
+            if (
+              newMessage.receiver_id !== userId
+            ) {
+              return;
+            }
+
+            const activeFriendId =
+              selectedFriendRef.current?.id || null;
+
+            const isActiveConversation =
+              activeFriendId === newMessage.sender_id;
+
+            /*
+              Mesaj sadece o kişiyle açık olan sohbetse
+              ekranda aktif konuşmaya eklenir.
+              Başka bir arkadaşın sohbetindeysek mesajı
+              mevcut sohbete karıştırmıyoruz.
+            */
+            if (isActiveConversation) {
+              setMessages(
+                (current) => {
+                  const exists =
+                    current.some(
+                      (message) =>
+                        message.id ===
+                        newMessage.id
+                    );
+
+                  if (exists) {
+                    return current;
+                  }
+
+                  return [
+                    ...current,
+                    newMessage
+                  ];
+                }
+              );
+            }
+
+            playMessageSound();
+
+            if (isActiveConversation) {
+              /*
+                Sohbet zaten açıksa mesajı hemen okundu
+                olarak işaretle ve bildirim sayısını sıfırla.
+              */
+              const {
+                error: readError
+              } = await supabase
+                .from('messages')
+                .update({
+                  read_at:
+                    new Date().toISOString()
+                })
+                .eq(
+                  'id',
+                  newMessage.id
+                )
+                .eq(
+                  'receiver_id',
+                  userId
+                );
+
+              if (readError) {
+                console.error(
+                  'Incoming message read error:',
+                  readError
+                );
+              }
+
+              setUnreadCounts(
+                (current) => ({
+                  ...current,
+                  [newMessage.sender_id]: 0
+                })
+              );
+            } else {
+              /*
+                Sohbet açık değilse sol taraftaki arkadaş
+                listesinde anlık okunmamış mesaj sayısını artır.
+              */
+              setUnreadCounts(
+                (current) => ({
+                  ...current,
+                  [newMessage.sender_id]:
+                    (current[newMessage.sender_id] || 0) + 1
+                })
+              );
+
+              console.log(
+                'ANCHOR UNREAD COUNT UPDATED:',
+                {
+                  senderId: newMessage.sender_id,
+                  count:
+                    (unreadCounts[newMessage.sender_id] || 0) + 1
+                }
+              );
+            }
+          }
+        )
+        .subscribe(
+          (status) => {
+            console.log(
+              'ANCHOR BROADCAST STATUS:',
+              status
+            );
+
+            if (
+              status ===
+              'SUBSCRIBED'
+            ) {
+              console.log(
+                'ANCHOR BROADCAST CONNECTED'
+              );
+            }
+
+            if (
+              status ===
+              'CHANNEL_ERROR'
+            ) {
+              console.error(
+                'ANCHOR BROADCAST CHANNEL ERROR'
+              );
+            }
+
+            if (
+              status ===
+              'TIMED_OUT'
+            ) {
+              console.error(
+                'ANCHOR BROADCAST TIMED OUT'
+              );
+            }
           }
         );
 
+    /*
+      Çevrimiçi / çevrimdışı durumları için ayrı
+      Broadcast kanalı kullanıyoruz.
+      Böylece profiles UPDATE postgres_changes'e
+      bağlı kalmadan durum anında karşı tarafa gider.
+    */
+    const presenceChannel =
+      supabase
+        .channel('anchor-presence')
+        .on(
+          'broadcast',
+          {
+            event: 'presence'
+          },
+          (payload) => {
+            const presence =
+              payload?.payload;
 
-        playMessageSound();
+            if (
+              !presence?.user_id ||
+              presence.user_id === userId
+            ) {
+              return;
+            }
 
+            const isOnline =
+              Boolean(presence.is_online);
 
-        await supabase
-          .from('messages')
-          .update({
-            read_at:
-              new Date().toISOString()
-          })
-          .eq(
-            'id',
-            newMessage.id
-          )
-          .eq(
-            'receiver_id',
-            userId
+            console.log(
+              'ANCHOR PRESENCE UPDATE:',
+              presence
+            );
+
+            setFriends(
+              (current) =>
+                current.map(
+                  (friend) =>
+                    friend.id ===
+                    presence.user_id
+                      ? {
+                          ...friend,
+                          is_online: isOnline,
+                          last_seen:
+                            presence.last_seen ||
+                            friend.last_seen
+                        }
+                      : friend
+                )
+            );
+
+            setSelectedFriend(
+              (current) => {
+                if (
+                  !current ||
+                  current.id !==
+                    presence.user_id
+                ) {
+                  return current;
+                }
+
+                return {
+                  ...current,
+                  is_online: isOnline,
+                  last_seen:
+                    presence.last_seen ||
+                    current.last_seen
+                };
+              }
+            );
+
+            setSearchResults(
+              (current) =>
+                current.map(
+                  (user) =>
+                    user.id ===
+                    presence.user_id
+                      ? {
+                          ...user,
+                          is_online: isOnline,
+                          last_seen:
+                            presence.last_seen ||
+                            user.last_seen
+                        }
+                      : user
+                )
+            );
+          }
+        )
+        .subscribe((status) => {
+          console.log(
+            'ANCHOR PRESENCE STATUS:',
+            status
           );
 
+          if (status === 'SUBSCRIBED') {
+            console.log(
+              'ANCHOR PRESENCE CONNECTED'
+            );
+          }
+        });
 
-        setUnreadCounts(
-          (current) => ({
-            ...current,
-            [newMessage.sender_id]: 0
-          })
-        );
-      };
+    presenceChannelRef.current =
+      presenceChannel;
 
-
+    /*
+      Buzz sistemi mevcut postgres_changes ile
+      çalışmaya devam ediyor.
+    */
     const handleIncomingBuzz =
       (payload) => {
+        console.log(
+          'ANCHOR REALTIME BUZZ:',
+          payload
+        );
+
         const newBuzz =
-          payload.new;
+          payload?.new;
 
         if (!newBuzz) {
           return;
@@ -1263,50 +1571,7 @@ function App({
         }
       };
 
-
-    const handleProfileChange =
-      (payload) => {
-        const changedProfile =
-          payload.new;
-
-        if (!changedProfile?.id) {
-          return;
-        }
-
-
-        setFriends(
-          (current) =>
-            current.map(
-              (friend) =>
-                friend.id === changedProfile.id
-                  ? {
-                      ...friend,
-                      ...changedProfile
-                    }
-                  : friend
-            )
-        );
-
-
-        setSelectedFriend(
-          (current) => {
-            if (
-              !current ||
-              current.id !== changedProfile.id
-            ) {
-              return current;
-            }
-
-            return {
-              ...current,
-              ...changedProfile
-            };
-          }
-        );
-      };
-
-
-    const channel =
+    const realtimeChannel =
       supabase
         .channel(
           `anchor-realtime-${userId}`
@@ -1316,40 +1581,72 @@ function App({
           {
             event: 'INSERT',
             schema: 'public',
-            table: 'messages',
-            filter:
-              `receiver_id=eq.${userId}`
-          },
-          handleIncomingMessage
-        )
-        .on(
-          'postgres_changes',
-          {
-            event: 'INSERT',
-            schema: 'public',
-            table: 'buzz_events',
-            filter:
-              `receiver_id=eq.${userId}`
+            table: 'buzz_events'
           },
           handleIncomingBuzz
         )
-        .on(
-          'postgres_changes',
-          {
-            event: 'UPDATE',
-            schema: 'public',
-            table: 'profiles'
-          },
-          handleProfileChange
-        )
-        .subscribe();
+        .subscribe(
+          (status) => {
+            console.log(
+              'ANCHOR REALTIME STATUS:',
+              status
+            );
 
+            if (
+              status ===
+              'SUBSCRIBED'
+            ) {
+              console.log(
+                'ANCHOR REALTIME CONNECTED'
+              );
+            }
+
+            if (
+              status ===
+              'CHANNEL_ERROR'
+            ) {
+              console.error(
+                'ANCHOR REALTIME CHANNEL ERROR'
+              );
+            }
+
+            if (
+              status ===
+              'TIMED_OUT'
+            ) {
+              console.error(
+                'ANCHOR REALTIME TIMED OUT'
+              );
+            }
+          }
+        );
 
     return () => {
+      console.log(
+        'ANCHOR REALTIME DISCONNECTED'
+      );
+
+      if (
+        presenceChannelRef.current ===
+        presenceChannel
+      ) {
+        presenceChannelRef.current =
+          null;
+      }
+
       supabase.removeChannel(
-        channel
+        messageChannel
+      );
+
+      supabase.removeChannel(
+        presenceChannel
+      );
+
+      supabase.removeChannel(
+        realtimeChannel
       );
     };
+
   }, [session?.user?.id]);
 
 
@@ -1360,6 +1657,7 @@ function App({
   const loadMessages = async (
     friend
   ) => {
+
     if (!session?.user?.id) {
       return;
     }
@@ -1399,6 +1697,7 @@ function App({
 
 
     if (error) {
+
       console.error(
         'Messages load error:',
         error
@@ -1441,6 +1740,7 @@ function App({
   const selectFriend = async (
     friend
   ) => {
+
     setSelectedFriend(
       friend
     );
@@ -1459,11 +1759,14 @@ function App({
 
   const markMessagesAsRead =
     async (friendId) => {
+
       if (!session?.user?.id) {
         return;
       }
 
-      await supabase
+      const {
+        error
+      } = await supabase
         .from('messages')
         .update({
           read_at:
@@ -1481,6 +1784,13 @@ function App({
           'read_at',
           null
         );
+
+      if (error) {
+        console.error(
+          'Mark messages as read error:',
+          error
+        );
+      }
     };
 
 
@@ -1489,9 +1799,11 @@ function App({
   ======================================================= */
 
   useEffect(() => {
+
     messagesEndRef.current?.scrollIntoView({
       behavior: 'smooth'
     });
+
   }, [messages]);
 
 
@@ -1501,6 +1813,7 @@ function App({
 
   const sendMessage =
     async (event) => {
+
       event?.preventDefault();
 
       if (!session?.user?.id) {
@@ -1518,7 +1831,6 @@ function App({
         return;
       }
 
-
       if (
         isBlocked(
           selectedFriend.id
@@ -1527,11 +1839,13 @@ function App({
         showToast(
           t.cannotMessageBlocked
         );
-
         return;
       }
 
-
+      /*
+        Önce mesajı veritabanına kaydet.
+        Böylece mesaj kalıcı olur.
+      */
       const {
         data,
         error
@@ -1547,8 +1861,7 @@ function App({
             'message'
         })
         .select()
-        .single();
-
+        .maybeSingle();
 
       if (error) {
         console.error(
@@ -1564,16 +1877,91 @@ function App({
         return;
       }
 
-
-      if (data) {
-        setMessages(
-          (current) => [
-            ...current,
-            data
-          ]
+      if (!data) {
+        console.error(
+          'Message insert returned no data.'
         );
+
+        showToast(
+          t.generic
+        );
+
+        return;
       }
 
+      /*
+        Gönderenin kendi ekranında
+        mesajı hemen göster.
+      */
+      setMessages(
+        (current) => {
+          const exists =
+            current.some(
+              (message) =>
+                message.id ===
+                data.id
+            );
+
+          if (exists) {
+            return current;
+          }
+
+          return [
+            ...current,
+            data
+          ];
+        }
+      );
+
+      /*
+        Alıcının kişisel Broadcast
+        kanalına mesajı gönder.
+      */
+      const receiverChannel =
+        supabase.channel(
+          `anchor-user-${selectedFriend.id}`
+        );
+
+      receiverChannel.subscribe(
+        async (status) => {
+          console.log(
+            'ANCHOR MESSAGE DELIVERY STATUS:',
+            status
+          );
+
+          if (
+            status !==
+            'SUBSCRIBED'
+          ) {
+            return;
+          }
+
+          try {
+            const result =
+              await receiverChannel.send({
+                type: 'broadcast',
+                event: 'message',
+                payload: data
+              });
+
+            console.log(
+              'ANCHOR MESSAGE BROADCAST SENT:',
+              result
+            );
+          } catch (broadcastError) {
+            console.error(
+              'ANCHOR BROADCAST SEND ERROR:',
+              broadcastError
+            );
+          }
+
+          window.setTimeout(() => {
+            supabase.removeChannel(
+              receiverChannel
+            );
+          }, 1000);
+        }
+      );
 
       setMessageText('');
     };
@@ -1585,6 +1973,7 @@ function App({
 
   const sendBuzz =
     async () => {
+
       if (!session?.user?.id) {
         return;
       }
@@ -1599,6 +1988,7 @@ function App({
           selectedFriend.id
         )
       ) {
+
         showToast(
           t.cannotMessageBlocked
         );
@@ -1620,6 +2010,7 @@ function App({
 
 
       if (error) {
+
         console.error(
           'Buzz error:',
           error
@@ -1648,6 +2039,7 @@ function App({
 
   const deleteMessage =
     async (messageId) => {
+
       if (!session?.user?.id) {
         return;
       }
@@ -1683,6 +2075,7 @@ function App({
 
 
       if (error) {
+
         console.error(
           'Delete message error:',
           error
@@ -1701,7 +2094,8 @@ function App({
         (current) =>
           current.map(
             (message) =>
-              message.id === messageId
+              message.id ===
+              messageId
                 ? {
                     ...message,
                     deleted_at:
@@ -1720,6 +2114,7 @@ function App({
 
   const blockUser =
     async (userId) => {
+
       if (!session?.user?.id) {
         return;
       }
@@ -1751,6 +2146,7 @@ function App({
         error &&
         error.code !== '23505'
       ) {
+
         console.error(
           'Block error:',
           error
@@ -1788,6 +2184,7 @@ function App({
 
   const unblockUser =
     async (userId) => {
+
       if (!session?.user?.id) {
         return;
       }
@@ -1819,6 +2216,7 @@ function App({
 
 
       if (error) {
+
         console.error(
           'Unblock error:',
           error
@@ -1854,6 +2252,7 @@ function App({
 
   const saveProfile =
     async () => {
+
       if (!session?.user?.id) {
         return;
       }
@@ -1863,6 +2262,7 @@ function App({
         editUsername.trim();
 
       if (!username) {
+
         showToast(
           t.invalidUser
         );
@@ -1875,7 +2275,6 @@ function App({
 
 
       const {
-        data,
         error
       } = await supabase
         .from('profiles')
@@ -1889,12 +2288,11 @@ function App({
         .eq(
           'id',
           session.user.id
-        )
-        .select()
-        .single();
+        );
 
 
       if (error) {
+
         console.error(
           'Profile save error:',
           error
@@ -1911,9 +2309,7 @@ function App({
       }
 
 
-      if (data) {
-        setProfile(data);
-      }
+      await loadProfile(session.user.id);
 
 
       setProfileModal(false);
@@ -1928,11 +2324,14 @@ function App({
 
   const logout =
     async () => {
+
       if (session?.user?.id) {
+
         await updateOnlineStatus(
           session.user.id,
           false
         );
+
       }
 
       await supabase.auth.signOut();
@@ -1945,6 +2344,7 @@ function App({
 
   const handleAvatarChange =
     (event) => {
+
       const file =
         event.target.files?.[0];
 
@@ -1967,9 +2367,11 @@ function App({
 
 
       reader.onload = () => {
+
         setEditAvatar(
           reader.result
         );
+
       };
 
 
@@ -1985,11 +2387,14 @@ function App({
 
   const searchUsers =
     async () => {
+
       const query =
         searchText.trim();
 
       if (!query) {
+
         setSearchResults([]);
+
         return;
       }
 
@@ -2015,6 +2420,7 @@ function App({
 
 
       if (error) {
+
         console.error(
           'Search error:',
           error
@@ -2037,14 +2443,20 @@ function App({
 
 
   useEffect(() => {
+
     const timer =
       window.setTimeout(() => {
+
         searchUsers();
+
       }, 350);
 
     return () => {
+
       clearTimeout(timer);
+
     };
+
   }, [searchText]);
 
 
@@ -2054,6 +2466,7 @@ function App({
 
   const sendFriendRequest =
     async (receiverId) => {
+
       if (!session?.user?.id) {
         return;
       }
@@ -2063,7 +2476,9 @@ function App({
         data: existing
       } = await supabase
         .from('friend_requests')
-        .select('id,status')
+        .select(
+          'id,status'
+        )
         .or(
           `and(sender_id.eq.${session.user.id},receiver_id.eq.${receiverId}),and(sender_id.eq.${receiverId},receiver_id.eq.${session.user.id})`
         );
@@ -2076,6 +2491,7 @@ function App({
             'accepted'
         )
       ) {
+
         showToast(
           t.myFriends
         );
@@ -2091,6 +2507,7 @@ function App({
             'pending'
         )
       ) {
+
         showToast(
           t.pending
         );
@@ -2114,6 +2531,7 @@ function App({
 
 
       if (error) {
+
         console.error(
           'Friend request error:',
           error
@@ -2140,6 +2558,7 @@ function App({
 
   const acceptRequest =
     async (request) => {
+
       if (!session?.user?.id) {
         return;
       }
@@ -2164,6 +2583,7 @@ function App({
 
 
       if (updateError) {
+
         console.error(
           'Accept request error:',
           updateError
@@ -2209,6 +2629,7 @@ function App({
 
 
       if (friendshipError) {
+
         console.error(
           'Friendship error:',
           friendshipError
@@ -2239,6 +2660,7 @@ function App({
 
   const rejectRequest =
     async (request) => {
+
       if (!session?.user?.id) {
         return;
       }
@@ -2263,6 +2685,7 @@ function App({
 
 
       if (error) {
+
         console.error(
           'Reject request error:',
           error
@@ -2289,6 +2712,7 @@ function App({
 
   const openProfileModal =
     () => {
+
       setEditUsername(
         profile?.username || ''
       );
@@ -2311,6 +2735,7 @@ function App({
 
   const formatTime =
     (dateString) => {
+
       if (!dateString) {
         return '';
       }
@@ -2335,6 +2760,7 @@ function App({
     user,
     size = 44
   }) => {
+
     const style = {
       width: size,
       height: size,
@@ -2359,6 +2785,7 @@ function App({
     if (
       user?.avatar_url
     ) {
+
       return (
         <img
           src={user.avatar_url}
@@ -2394,6 +2821,7 @@ function App({
 
   const MessageItem =
     ({ message }) => {
+
       const mine =
         message.sender_id ===
         session.user.id;
@@ -2423,9 +2851,11 @@ function App({
 
             {deleted ? (
               <div className="deleted-message">
+
                 <em>
                   {t.deletedMessage}
                 </em>
+
               </div>
             ) : (
               <div className="message-content">
@@ -2494,6 +2924,7 @@ function App({
 
   const FriendItem =
     ({ friend }) => {
+
       const selected =
         selectedFriend?.id ===
         friend.id;
@@ -2553,7 +2984,27 @@ function App({
 
 
           {unread > 0 && (
-            <span className="unread-badge">
+            <span
+              className="unread-badge"
+              style={{
+                marginLeft: 'auto',
+                minWidth: '22px',
+                height: '22px',
+                padding: '0 7px',
+                borderRadius: '999px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: '#ef4444',
+                color: '#ffffff',
+                fontSize: '12px',
+                fontWeight: 800,
+                lineHeight: 1,
+                flexShrink: 0,
+                boxSizing: 'border-box',
+                zIndex: 10
+              }}
+            >
               {unread > 99
                 ? '99+'
                 : unread}
@@ -2596,6 +3047,7 @@ function App({
             />
 
             <div>
+
               <strong>
                 {profile?.username ||
                   session.user.email}
@@ -2606,6 +3058,7 @@ function App({
                   ? t.onlineNow
                   : t.offlineNow}
               </small>
+
             </div>
 
           </button>
@@ -2717,11 +3170,13 @@ function App({
             <div className="search-results">
 
               <div className="section-title">
+
                 <Search
                   size={15}
                 />
 
                 {t.searchUsers}
+
               </div>
 
 
@@ -2790,6 +3245,7 @@ function App({
             <div className="sidebar-section">
 
               <div className="section-title">
+
                 <UserPlus
                   size={15}
                 />
@@ -2799,6 +3255,7 @@ function App({
                 <span className="section-count">
                   {friendRequests.length}
                 </span>
+
               </div>
 
 
@@ -2818,6 +3275,7 @@ function App({
                         </span>
 
                         <div>
+
                           <strong>
                             {request.sender_id.slice(
                               0,
@@ -2828,6 +3286,7 @@ function App({
                           <small>
                             {t.pending}
                           </small>
+
                         </div>
 
                       </div>
@@ -2887,6 +3346,7 @@ function App({
           <div className="sidebar-section friends-section">
 
             <div className="section-title">
+
               <Users
                 size={15}
               />
@@ -2896,11 +3356,13 @@ function App({
               <span className="section-count">
                 {friends.length}
               </span>
+
             </div>
 
 
             {friends.length === 0 ? (
               <div className="empty-friends">
+
                 <Users
                   size={28}
                 />
@@ -2908,6 +3370,7 @@ function App({
                 <p>
                   {t.noFriends}
                 </p>
+
               </div>
             ) : (
               <div className="friends-list">
@@ -2982,9 +3445,11 @@ function App({
             <div className="welcome-panel">
 
               <div className="welcome-icon">
+
                 <MessageCircle
                   size={40}
                 />
+
               </div>
 
               <h2>
@@ -3177,10 +3642,13 @@ function App({
 
                 {loadingMessages ? (
                   <div className="messages-empty">
+
                     <div className="loading-spinner" />
+
                     <span>
                       {t.checking}
                     </span>
+
                   </div>
                 ) : messages.length === 0 ? (
                   <div className="messages-empty">
@@ -3291,12 +3759,14 @@ function App({
         <div
           className="modal-backdrop"
           onMouseDown={(e) => {
+
             if (
               e.target ===
               e.currentTarget
             ) {
               setProfileModal(false);
             }
+
           }}
         >
 
@@ -3478,6 +3948,7 @@ function App({
 
       {toast && (
         <div className="anchor-toast">
+
           <Check
             size={16}
           />
@@ -3485,6 +3956,7 @@ function App({
           <span>
             {toast}
           </span>
+
         </div>
       )}
 
@@ -3503,6 +3975,7 @@ function Root() {
 
 
   useEffect(() => {
+
     let mounted = true;
 
 
@@ -3512,6 +3985,7 @@ function Root() {
         ({
           data
         }) => {
+
           if (!mounted) {
             return;
           }
@@ -3519,6 +3993,7 @@ function Root() {
           setSession(
             data.session
           );
+
         }
       );
 
@@ -3529,6 +4004,7 @@ function Root() {
     } =
       supabase.auth.onAuthStateChange(
         (_event, newSession) => {
+
           if (!mounted) {
             return;
           }
@@ -3536,17 +4012,21 @@ function Root() {
           setSession(
             newSession
           );
+
         }
       );
 
 
     return () => {
+
       mounted = false;
 
       authListener
         ?.subscription
         ?.unsubscribe();
+
     };
+
   }, []);
 
 
@@ -3559,15 +4039,18 @@ function Root() {
 
 
   if (session === undefined) {
+
     return (
       <div className="loading-page">
         <Logo />
       </div>
     );
+
   }
 
 
   if (!session) {
+
     return (
       <Auth
         language={language}
@@ -3575,6 +4058,7 @@ function Root() {
         onAuth={() => {}}
       />
     );
+
   }
 
 
