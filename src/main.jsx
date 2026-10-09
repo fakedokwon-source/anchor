@@ -797,6 +797,10 @@ function App({
   const [profileModal, setProfileModal] =
     useState(false);
 
+  // Public read-only profile shown when a friend is clicked by name/avatar.
+  const [viewedProfile, setViewedProfile] =
+    useState(null);
+
   const [editUsername, setEditUsername] =
     useState('');
 
@@ -2710,6 +2714,11 @@ function App({
      OPEN PROFILE MODAL
   ======================================================= */
 
+  const openViewedProfile = (friend) => {
+    setViewedProfile(friend || null);
+  };
+
+
   const openProfileModal =
     () => {
 
@@ -2952,10 +2961,28 @@ function App({
 
           <div className="friend-avatar-wrap">
 
-            <Avatar
-              user={friend}
-              size={44}
-            />
+            <span
+              role="button"
+              tabIndex={0}
+              title="View profile"
+              onClick={(event) => {
+                event.stopPropagation();
+                openViewedProfile(friend);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  openViewedProfile(friend);
+                }
+              }}
+              style={{ display: 'inline-flex', borderRadius: '50%', cursor: 'pointer' }}
+            >
+              <Avatar
+                user={friend}
+                size={44}
+              />
+            </span>
 
             <span
               className={
@@ -2970,7 +2997,23 @@ function App({
 
           <div className="friend-info">
 
-            <strong>
+            <strong
+              role="button"
+              tabIndex={0}
+              title="View profile"
+              onClick={(event) => {
+                event.stopPropagation();
+                openViewedProfile(friend);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  openViewedProfile(friend);
+                }
+              }}
+              style={{ cursor: 'pointer' }}
+            >
               {friend.username}
             </strong>
 
@@ -3754,6 +3797,39 @@ function App({
       {/* ===================================================
           PROFILE MODAL
       =================================================== */}
+
+      {viewedProfile && (
+        <div
+          className="modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setViewedProfile(null);
+          }}
+        >
+          <div className="profile-modal" role="dialog" aria-modal="true" aria-label="User profile" style={{ maxWidth: '420px' }}>
+            <div className="modal-header">
+              <div>
+                <h3>Profile</h3>
+                <p>ANCHOR</p>
+              </div>
+              <button type="button" className="modal-close" onClick={() => setViewedProfile(null)} aria-label="Close profile">
+                <X size={20} />
+              </button>
+            </div>
+            <div style={{ padding: '28px 24px 30px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '18px' }}>
+              <Avatar user={viewedProfile} size={92} />
+              <h2 style={{ margin: 0, color: '#202a38', overflowWrap: 'anywhere' }}>
+                {viewedProfile.username || 'User'}
+              </h2>
+              <div style={{ width: '100%', textAlign: 'left', background: '#f8fafc', border: '1px solid #e5eaf0', borderRadius: '14px', padding: '16px' }}>
+                <div style={{ fontSize: '11px', fontWeight: 800, letterSpacing: '0.08em', color: '#64748b', marginBottom: '8px' }}>ABOUT</div>
+                <div style={{ color: '#263445', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', lineHeight: 1.6 }}>
+                  {viewedProfile.about?.trim() || 'No information added yet.'}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {profileModal && (
         <div
