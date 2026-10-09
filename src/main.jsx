@@ -51,6 +51,159 @@ function Logo({ small = false }) {
 
 
 /* =========================================================
+   LIVE TERRA CLASSIC PRICE TICKER
+========================================================= */
+function MarketTicker() {
+  const [markets, setMarkets] = useState([
+    { symbol: 'LUNC/USDT', id: 'terra-luna', price: null, change: null, loading: true },
+    { symbol: 'USTC/USDT', id: 'terrausd', price: null, change: null, loading: true },
+    { symbol: 'JURIS/USDT', id: 'juris-protocol', price: null, change: null, loading: true }
+  ]);
+
+  useEffect(() => {
+    let active = true;
+    const targets = [
+      { symbol: 'LUNC/USDT', id: 'terra-luna' },
+      { symbol: 'USTC/USDT', id: 'terrausd' },
+      { symbol: 'JURIS/USDT', id: 'juris-protocol' }
+    ];
+
+    const getJson = async (url) => {
+      const response = await fetch(url, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`Price provider returned ${response.status}`);
+      return response.json();
+    };
+
+    const loadPrices = async () => {
+      // Keep the last known prices visible if one provider temporarily fails.
+      let next = null;
+      try {
+        const data = await getJson(
+          'https://api.coingecko.com/api/v3/simple/price?ids=terra-luna,terrausd,juris-protocol&vs_currencies=usd&include_24hr_change=true'
+        );
+        next = targets.map((target) => {
+          const coin = data[target.id];
+          const price = Number(coin?.usd);
+          const change = Number(coin?.usd_24h_change);
+          return {
+            ...target,
+            price: Number.isFinite(price) && price > 0 ? price : null,
+            change: Number.isFinite(change) ? change : null,
+            loading: false
+          };
+        });
+      } catch (error) {
+        console.warn('ANCHOR CoinGecko ticker unavailable; trying fallback providers.', error);
+      }
+
+      // Binance provides direct LUNC/USDT and USTC/USDT market prices.
+      const fallbackJobs = [
+        getJson('https://api.binance.com/api/v3/ticker/24hr?symbol=LUNCUSDT')
+          .then((data) => ({ index: 0, price: Number(data.lastPrice), change: Number(data.priceChangePercent) })),
+        getJson('https://api.binance.com/api/v3/ticker/24hr?symbol=USTCUSDT')
+          .then((data) => ({ index: 1, price: Number(data.lastPrice), change: Number(data.priceChangePercent) })),
+        // JURIS/USDT is listed on WEEX. Use its public SPOT ticker first;
+        // DexScreener is a secondary fallback (it may not index CEX pairs).
+        (async () => {
+          try {
+            const data = await getJson('https://api-spot.weex.com/api/v3/ticker/24hr?symbol=JURISUSDT');
+            const ticker = Array.isArray(data) ? data.find((item) => String(item.symbol || '').toUpperCase() === 'JURISUSDT') : data;
+            const price = Number(ticker?.lastPrice);
+            const change = Number(ticker?.priceChangePercent ?? ticker?.priceChange);
+            if (Number.isFinite(price) && price > 0) {
+              return { index: 2, price, change };
+            }
+            throw new Error('WEEX did not return a valid JURISUSDT spot price');
+          } catch (weexError) {
+            const data = await getJson('https://api.dexscreener.com/latest/dex/search?q=JURIS');
+            const pairs = (data.pairs || []).filter((pair) =>
+              String(pair.baseToken?.symbol || '').toUpperCase() === 'JURIS' &&
+              String(pair.quoteToken?.symbol || '').toUpperCase() === 'USDT' &&
+              Number(pair.priceUsd) > 0
+            );
+            pairs.sort((a, b) => Number(b.liquidity?.usd || 0) - Number(a.liquidity?.usd || 0));
+            const pair = pairs[0];
+            if (!pair) throw new Error('No valid JURIS/USDT price from WEEX or DexScreener');
+            return { index: 2, price: Number(pair.priceUsd), change: Number(pair.priceChange?.h24) };
+          }
+        })()
+      ];
+
+      const fallbackResults = await Promise.allSettled(fallbackJobs);
+      if (!next) {
+        next = targets.map((target) => ({ ...target, price: null, change: null, loading: false }));
+      }
+      fallbackResults.forEach((result) => {
+        if (result.status !== 'fulfilled') return;
+        const { index, price, change } = result.value;
+        if (Number.isFinite(price) && price > 0) {
+          next[index] = { ...next[index], price, change: Number.isFinite(change) ? change : next[index].change, loading: false };
+        }
+      });
+
+      if (active) {
+        setMarkets((current) => next.map((market, index) => ({
+          ...market,
+          // If all providers fail for a symbol, preserve its previous valid price.
+          price: market.price ?? current[index]?.price ?? null,
+          change: market.change ?? current[index]?.change ?? null,
+          loading: false
+        })));
+      }
+    };
+
+    loadPrices();
+    const timer = window.setInterval(loadPrices, 60000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const formatPrice = (value) => {
+    if (value == null || !Number.isFinite(value)) return 'Veri bulunamadı';
+    if (value < 0.000001) return '$' + value.toFixed(10);
+    if (value < 0.0001) return '$' + value.toFixed(8);
+    if (value < 0.01) return '$' + value.toFixed(6);
+    if (value < 1) return '$' + value.toFixed(5);
+    return '$' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  };
+
+  const cards = markets;
+  return (
+    <div className="anchor-market-ticker" aria-label="LUNC, USTC ve JURIS fiyatları">
+      <style>{`
+        .anchor-market-ticker{width:100%;overflow:hidden;position:relative;box-sizing:border-box;background:linear-gradient(90deg,#101a2a,#142235 50%,#101a2a);border-bottom:1px solid rgba(130,160,195,.16);border-top:1px solid rgba(130,160,195,.10);}
+        .anchor-market-track{display:flex;width:max-content;animation:anchor-market-scroll 22s linear infinite;}
+        .anchor-market-track:hover{animation-play-state:paused;}
+        .anchor-market-card{display:flex;align-items:center;gap:10px;padding:11px 24px;min-width:190px;border-right:1px solid rgba(130,160,195,.15);white-space:nowrap;}
+        .anchor-market-symbol{color:#e7edf7;font-size:12px;font-weight:800;letter-spacing:.35px;}
+        .anchor-market-price{color:#f8fafc;font-size:13px;font-weight:700;}
+        .anchor-market-change{font-size:11px;font-weight:800;}
+        .anchor-market-change.up{color:#36d399;}.anchor-market-change.down{color:#fb7185;}.anchor-market-change.neutral{color:#9caec4;}
+        .anchor-market-dot{width:7px;height:7px;flex:0 0 7px;border-radius:50%;background:#36d399;box-shadow:0 0 8px rgba(54,211,153,.45);}
+        @keyframes anchor-market-scroll{from{transform:translateX(100vw)}to{transform:translateX(-100%)}}
+        @media(prefers-reduced-motion:reduce){.anchor-market-track{animation:none;}}
+      `}</style>
+      <div className="anchor-market-track">
+        {cards.map((market, index) => (
+          <div className="anchor-market-card" key={`${market.symbol}-${index}`}>
+            <span className="anchor-market-dot" />
+            <span className="anchor-market-symbol">{market.symbol}</span>
+            <span className="anchor-market-price">{market.loading ? 'Yükleniyor…' : formatPrice(market.price)}</span>
+            {!market.loading && market.change != null && (
+              <span className={`anchor-market-change ${market.change > 0 ? 'up' : market.change < 0 ? 'down' : 'neutral'}`}>
+                {market.change > 0 ? '+' : ''}{market.change.toFixed(2)}%
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
    AUDIO
 ========================================================= */
 
@@ -797,9 +950,14 @@ function App({
   const [profileModal, setProfileModal] =
     useState(false);
 
-  // Public read-only profile shown when a friend is clicked by name/avatar.
-  const [viewedProfile, setViewedProfile] =
+  const [viewedFriendProfile, setViewedFriendProfile] =
     useState(null);
+
+  const [viewFriendProfileModal, setViewFriendProfileModal] =
+    useState(false);
+
+  const [loadingFriendProfile, setLoadingFriendProfile] =
+    useState(false);
 
   const [editUsername, setEditUsername] =
     useState('');
@@ -2711,13 +2869,40 @@ function App({
 
 
   /* =======================================================
-     OPEN PROFILE MODAL
+     VIEW A FRIEND'S PROFILE (READ-ONLY)
   ======================================================= */
 
-  const openViewedProfile = (friend) => {
-    setViewedProfile(friend || null);
+  const openFriendProfile = async (friend) => {
+    if (!friend?.id) return;
+
+    // Show the information already loaded in the friend list immediately.
+    setViewedFriendProfile(friend);
+    setViewFriendProfileModal(true);
+    setLoadingFriendProfile(true);
+
+    // Refresh from profiles so the latest avatar/about text is shown.
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, username, about, avatar_url, is_online, created_at')
+      .eq('id', friend.id)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Friend profile load error:', error);
+      // Keep the profile data already available rather than closing the modal.
+    } else if (data) {
+      setViewedFriendProfile((current) =>
+        current?.id === friend.id ? { ...current, ...data } : current
+      );
+    }
+
+    setLoadingFriendProfile(false);
   };
 
+
+  /* =======================================================
+     OPEN PROFILE MODAL
+  ======================================================= */
 
   const openProfileModal =
     () => {
@@ -2961,28 +3146,10 @@ function App({
 
           <div className="friend-avatar-wrap">
 
-            <span
-              role="button"
-              tabIndex={0}
-              title="View profile"
-              onClick={(event) => {
-                event.stopPropagation();
-                openViewedProfile(friend);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  openViewedProfile(friend);
-                }
-              }}
-              style={{ display: 'inline-flex', borderRadius: '50%', cursor: 'pointer' }}
-            >
-              <Avatar
-                user={friend}
-                size={44}
-              />
-            </span>
+            <Avatar
+              user={friend}
+              size={44}
+            />
 
             <span
               className={
@@ -2997,23 +3164,7 @@ function App({
 
           <div className="friend-info">
 
-            <strong
-              role="button"
-              tabIndex={0}
-              title="View profile"
-              onClick={(event) => {
-                event.stopPropagation();
-                openViewedProfile(friend);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  openViewedProfile(friend);
-                }
-              }}
-              style={{ cursor: 'pointer' }}
-            >
+            <strong>
               {friend.username}
             </strong>
 
@@ -3134,6 +3285,7 @@ function App({
 
       </header>
 
+      <MarketTicker />
 
       {/* ===================================================
           DASHBOARD
@@ -3525,7 +3677,20 @@ function App({
 
               <div className="chat-header">
 
-                <div className="chat-user">
+                <div
+                  className="chat-user"
+                  role="button"
+                  tabIndex={0}
+                  title={language === 'tr' ? 'Arkadaşın profilini görüntüle' : language === 'de' ? 'Profil ansehen' : 'View profile'}
+                  onClick={() => openFriendProfile(selectedFriend)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      openFriendProfile(selectedFriend);
+                    }
+                  }}
+                  style={{ cursor: 'pointer' }}
+                >
 
                   <div className="chat-avatar-wrap">
 
@@ -3795,41 +3960,80 @@ function App({
 
 
       {/* ===================================================
-          PROFILE MODAL
+          FRIEND PROFILE VIEW MODAL (READ-ONLY)
       =================================================== */}
 
-      {viewedProfile && (
+      {viewFriendProfileModal && viewedFriendProfile && (
         <div
           className="modal-backdrop"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setViewedProfile(null);
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) {
+              setViewFriendProfileModal(false);
+            }
           }}
         >
-          <div className="profile-modal" role="dialog" aria-modal="true" aria-label="User profile" style={{ maxWidth: '420px' }}>
+          <div className="profile-modal" role="dialog" aria-modal="true" aria-label={language === 'tr' ? 'Arkadaş profili' : language === 'de' ? 'Freundesprofil' : 'Friend profile'}>
             <div className="modal-header">
               <div>
-                <h3>Profile</h3>
-                <p>ANCHOR</p>
+                <h3>{language === 'tr' ? 'Profil' : language === 'de' ? 'Profil' : 'Profile'}</h3>
+                <p>{language === 'tr' ? 'Arkadaş bilgileri' : language === 'de' ? 'Profilinformationen' : 'Friend information'}</p>
               </div>
-              <button type="button" className="modal-close" onClick={() => setViewedProfile(null)} aria-label="Close profile">
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => setViewFriendProfileModal(false)}
+                aria-label={language === 'tr' ? 'Kapat' : language === 'de' ? 'Schließen' : 'Close'}
+              >
                 <X size={20} />
               </button>
             </div>
-            <div style={{ padding: '28px 24px 30px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '18px' }}>
-              <Avatar user={viewedProfile} size={92} />
-              <h2 style={{ margin: 0, color: '#202a38', overflowWrap: 'anywhere' }}>
-                {viewedProfile.username || 'User'}
-              </h2>
-              <div style={{ width: '100%', textAlign: 'left', background: '#f8fafc', border: '1px solid #e5eaf0', borderRadius: '14px', padding: '16px' }}>
-                <div style={{ fontSize: '11px', fontWeight: 800, letterSpacing: '0.08em', color: '#64748b', marginBottom: '8px' }}>ABOUT</div>
-                <div style={{ color: '#263445', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', lineHeight: 1.6 }}>
-                  {viewedProfile.about?.trim() || 'No information added yet.'}
+
+            <div className="profile-edit-body">
+              <div className="profile-photo-editor">
+                <div className="profile-photo-preview">
+                  {viewedFriendProfile.avatar_url ? (
+                    <img src={viewedFriendProfile.avatar_url} alt={viewedFriendProfile.username || 'Profile'} />
+                  ) : (
+                    <span>{(viewedFriendProfile.username || '?').charAt(0).toUpperCase()}</span>
+                  )}
                 </div>
+              </div>
+
+              <div className="modal-field">
+                <span>{language === 'tr' ? 'Kullanıcı adı' : language === 'de' ? 'Benutzername' : 'Username'}</span>
+                <strong>{viewedFriendProfile.username || '—'}</strong>
+              </div>
+
+              <div className="modal-field">
+                <span>{language === 'tr' ? 'Hakkında' : language === 'de' ? 'Über mich' : 'About'}</span>
+                <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin: '8px 0 0', color: 'var(--text-primary, #e5edf7)' }}>
+                  {viewedFriendProfile.about || (language === 'tr' ? 'Henüz bilgi eklenmemiş.' : language === 'de' ? 'Noch keine Informationen.' : 'No information added yet.')}
+                </p>
+              </div>
+
+              <div className="profile-email">
+                <span>{language === 'tr' ? 'Durum' : language === 'de' ? 'Status' : 'Status'}</span>
+                <strong>{viewedFriendProfile.is_online ? (language === 'tr' ? 'Çevrimiçi' : language === 'de' ? 'Online' : 'Online') : (language === 'tr' ? 'Çevrimdışı' : language === 'de' ? 'Offline' : 'Offline')}</strong>
+              </div>
+
+              {loadingFriendProfile && (
+                <p style={{ fontSize: '12px', opacity: 0.7 }}>{language === 'tr' ? 'Profil güncelleniyor…' : language === 'de' ? 'Profil wird aktualisiert…' : 'Refreshing profile…'}</p>
+              )}
+
+              <div className="modal-actions">
+                <button type="button" className="primary-button" onClick={() => setViewFriendProfileModal(false)}>
+                  {language === 'tr' ? 'Kapat' : language === 'de' ? 'Schließen' : 'Close'}
+                </button>
               </div>
             </div>
           </div>
         </div>
       )}
+
+
+      {/* ===================================================
+          PROFILE MODAL
+      =================================================== */}
 
       {profileModal && (
         <div
