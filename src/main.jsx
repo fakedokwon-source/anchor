@@ -24,7 +24,13 @@ import {
   Zap,
   Camera,
   Globe,
-  Circle
+  Circle,
+  Hash,
+  Plus,
+  Lock,
+  Globe2,
+  Crown,
+  UserCog
 } from 'lucide-react';
 
 import { supabase } from './lib/supabase';
@@ -922,6 +928,18 @@ function App({
   const [selectedFriend, setSelectedFriend] =
     useState(null);
 
+  const [groups, setGroups] = useState([]);
+  const [selectedGroup, setSelectedGroup] = useState(null);
+  const [groupMembers, setGroupMembers] = useState([]);
+  const [groupMessages, setGroupMessages] = useState([]);
+  const [groupMessageText, setGroupMessageText] = useState('');
+  const [groupModalOpen, setGroupModalOpen] = useState(false);
+  const [newGroupName, setNewGroupName] = useState('');
+  const [newGroupUsername, setNewGroupUsername] = useState('');
+  const [newGroupDescription, setNewGroupDescription] = useState('');
+  const [newGroupPrivate, setNewGroupPrivate] = useState(false);
+  const [loadingGroups, setLoadingGroups] = useState(false);
+
   /*
     Realtime mesaj handler'i useEffect içinde çalıştığı için
     seçili sohbeti her zaman güncel tutuyoruz.
@@ -1811,6 +1829,146 @@ function App({
 
   }, [session?.user?.id]);
 
+
+  /* =======================================================
+     GROUPS
+  ======================================================= */
+  const loadGroups = async () => {
+    if (!session?.user?.id) return;
+    setLoadingGroups(true);
+    const [{ data: groupData, error: groupError }, { data: memberData }] = await Promise.all([
+      supabase.from('groups').select('*').order('created_at', { ascending: false }),
+      supabase.from('group_members').select('group_id, role').eq('user_id', session.user.id)
+    ]);
+    if (groupError) {
+      console.error('Groups load error:', groupError);
+      showToast(language === 'tr' ? 'Gruplar yüklenemedi. Önce Supabase SQL kurulumunu yap.' : 'Could not load groups. Run the Supabase SQL setup first.');
+      setLoadingGroups(false);
+      return;
+    }
+    const membershipMap = new Map((memberData || []).map(row => [row.group_id, row.role]));
+    setGroups((groupData || []).map(group => ({ ...group, is_member: membershipMap.has(group.id), my_role: membershipMap.get(group.id) || null })));
+    setLoadingGroups(false);
+  };
+
+  useEffect(() => { loadGroups(); }, [session?.user?.id]);
+
+  const createGroup = async (event) => {
+    event?.preventDefault();
+    const name = newGroupName.trim();
+    const username = newGroupUsername.trim().toLowerCase().replace(/^@/, '');
+    if (!name || !/^[a-z0-9_]{3,24}$/.test(username)) {
+      showToast(language === 'tr' ? 'Grup adı gir ve kullanıcı adını 3-24 karakter, harf/rakam/_ biçiminde yaz.' : 'Enter a group name and a 3–24 character username (letters, numbers, _).');
+      return;
+    }
+    const { data: group, error } = await supabase.from('groups').insert({
+      name, username, description: newGroupDescription.trim(), is_private: newGroupPrivate, created_by: session.user.id
+    }).select('*').single();
+    if (error) {
+      console.error('Create group error:', error);
+      showToast(error.code === '23505' ? (language === 'tr' ? 'Bu grup kullanıcı adı zaten alınmış.' : 'That group username is already taken.') : (error.message || t.generic));
+      return;
+    }
+    const { error: memberError } = await supabase.from('group_members').insert({ group_id: group.id, user_id: session.user.id, role: 'owner' });
+    if (memberError) {
+      console.error('Group owner membership error:', memberError);
+      showToast(language === 'tr' ? 'Grup açıldı fakat kurucu üyeliği eklenemedi. SQL politikalarını kontrol et.' : 'Group created, but owner membership failed. Check SQL policies.');
+    }
+    setGroupModalOpen(false);
+    setNewGroupName(''); setNewGroupUsername(''); setNewGroupDescription(''); setNewGroupPrivate(false);
+    await loadGroups();
+    setSelectedFriend(null);
+    setSelectedGroup({ ...group, is_member: true, my_role: 'owner' });
+    await loadGroupConversation(group, true);
+    showToast(language === 'tr' ? 'Grup oluşturuldu.' : 'Group created.');
+  };
+
+  const joinGroup = async (group) => {
+    if (group.is_private) { showToast(language === 'tr' ? 'Bu grup gizli; yalnızca davetle katılınabilir.' : 'This is a private group; membership is by invitation.'); return; }
+    const { error } = await supabase.from('group_members').insert({ group_id: group.id, user_id: session.user.id, role: 'member' });
+    if (error && error.code !== '23505') { showToast(error.message || t.generic); return; }
+    await loadGroups();
+    const joined = { ...group, is_member: true, my_role: 'member' };
+    setSelectedFriend(null); setSelectedGroup(joined);
+    await loadGroupConversation(joined, true);
+  };
+
+  const loadGroupConversation = async (group, loadRoster = false) => {
+    if (!group?.id) return;
+    const { data, error } = await supabase.from('group_messages').select('id, group_id, sender_id, content, created_at').eq('group_id', group.id).order('created_at', { ascending: true });
+    if (error) { console.error('Group messages load error:', error); setGroupMessages([]); }
+    else setGroupMessages(data || []);
+    if (loadRoster) {
+      const { data: roster, error: rosterError } = await supabase.from('group_members').select('id, user_id, role, joined_at').eq('group_id', group.id).order('joined_at', { ascending: true });
+      if (rosterError) { console.error('Group members load error:', rosterError); setGroupMembers([]); }
+      else {
+        const ids = (roster || []).map(member => member.user_id);
+        let profilesById = {};
+        if (ids.length) {
+          const { data: people } = await supabase.from('profiles').select('id, username, avatar_url, is_online').in('id', ids);
+          profilesById = Object.fromEntries((people || []).map(person => [person.id, person]));
+        }
+        setGroupMembers((roster || []).map(member => ({ ...member, profile: profilesById[member.user_id] || { id: member.user_id, username: member.user_id.slice(0, 8) } })));
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedGroup?.id || !selectedGroup.is_member) return;
+    loadGroupConversation(selectedGroup, true);
+    const timer = window.setInterval(() => loadGroupConversation(selectedGroup, false), 4000);
+    return () => window.clearInterval(timer);
+  }, [selectedGroup?.id, selectedGroup?.is_member]);
+
+  const sendGroupMessage = async (event) => {
+    event?.preventDefault();
+    const content = groupMessageText.trim();
+    if (!content || !selectedGroup?.id || !session?.user?.id) return;
+    const { data, error } = await supabase.from('group_messages').insert({ group_id: selectedGroup.id, sender_id: session.user.id, content }).select().single();
+    if (error) { showToast(error.message || t.generic); return; }
+    setGroupMessages(current => [...current, data]);
+    setGroupMessageText('');
+  };
+
+  const manageGroupMember = async (member) => {
+    if (!selectedGroup || !['owner', 'admin'].includes(selectedGroup.my_role)) return;
+    if (member.user_id === session.user.id || member.role === 'owner') return;
+    const isOwner = selectedGroup.my_role === 'owner';
+    const action = window.prompt(
+      language === 'tr' ? `${member.profile.username || 'Üye'} için işlem yaz: \"admin\" yönetici yap, \"member\" normal üyeye çevir${isOwner ? ', \"remove\" çıkar' : ', \"remove\" çıkar'}.` : `Action for ${member.profile.username || 'member'}: type admin, member, or remove.`,
+      member.role === 'admin' ? 'member' : 'admin'
+    );
+    if (!action) return;
+    if (action.toLowerCase() === 'remove') {
+      if (!window.confirm(language === 'tr' ? 'Bu üyeyi gruptan çıkarmak istiyor musun?' : 'Remove this member from the group?')) return;
+      const { error } = await supabase.from('group_members').delete().eq('group_id', selectedGroup.id).eq('user_id', member.user_id);
+      if (error) { showToast(error.message || t.generic); return; }
+    } else if (action.toLowerCase() === 'admin' && isOwner) {
+      const { error } = await supabase.from('group_members').update({ role: 'admin' }).eq('group_id', selectedGroup.id).eq('user_id', member.user_id);
+      if (error) { showToast(error.message || t.generic); return; }
+    } else if (action.toLowerCase() === 'member' && isOwner) {
+      const { error } = await supabase.from('group_members').update({ role: 'member' }).eq('group_id', selectedGroup.id).eq('user_id', member.user_id);
+      if (error) { showToast(error.message || t.generic); return; }
+    } else {
+      showToast(language === 'tr' ? 'Geçersiz işlem veya bu işlem için kurucu yetkisi gerekiyor.' : 'Invalid action or owner permission required.');
+      return;
+    }
+    await loadGroupConversation(selectedGroup, true);
+  };
+
+  const inviteFriendToGroup = async () => {
+    if (!selectedGroup || !['owner', 'admin'].includes(selectedGroup.my_role)) return;
+    const candidates = friends.filter(friend => !groupMembers.some(member => member.user_id === friend.id));
+    if (!candidates.length) { showToast(language === 'tr' ? 'Eklenecek arkadaş bulunamadı.' : 'No friends available to add.'); return; }
+    const list = candidates.map((friend, index) => `${index + 1}. ${friend.username}`).join('\n');
+    const answer = window.prompt((language === 'tr' ? 'Gruba eklenecek arkadaşın numarasını yaz:\n' : 'Enter the number of the friend to add:\n') + list);
+    const index = Number(answer) - 1;
+    if (!Number.isInteger(index) || index < 0 || index >= candidates.length) return;
+    const { error } = await supabase.from('group_members').insert({ group_id: selectedGroup.id, user_id: candidates[index].id, role: 'member' });
+    if (error) { showToast(error.message || t.generic); return; }
+    await loadGroupConversation(selectedGroup, true);
+    await loadGroups();
+  };
 
   /* =======================================================
      LOAD MESSAGES
@@ -3585,6 +3743,24 @@ function App({
           </div>
 
 
+          {/* GROUPS */}
+          <div className="sidebar-section" style={{ marginTop: 18 }}>
+            <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Users size={15} />
+              <span>{language === 'tr' ? 'Gruplar' : language === 'de' ? 'Gruppen' : 'Groups'}</span>
+              <button type="button" onClick={() => setGroupModalOpen(true)} title={language === 'tr' ? 'Grup oluştur' : 'Create group'} style={{ marginLeft: 'auto', border: 0, borderRadius: 7, padding: 5, cursor: 'pointer', background: 'var(--accent, #5b7cfa)', color: 'white', display: 'inline-flex' }}><Plus size={15}/></button>
+            </div>
+            {loadingGroups ? <div className="empty-small">{t.checking}</div> : groups.length === 0 ? <div className="empty-small">{language === 'tr' ? 'Henüz grup yok. + ile oluştur.' : 'No groups yet. Create one with +.'}</div> : groups.map(group => (
+              <div key={group.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 5px', borderRadius: 8, background: selectedGroup?.id === group.id ? 'rgba(91,124,250,.13)' : 'transparent', marginTop: 3 }}>
+                <button type="button" onClick={() => group.is_member ? (setSelectedFriend(null), setSelectedGroup(group), loadGroupConversation(group, true)) : joinGroup(group)} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, textAlign: 'left', border: 0, background: 'transparent', color: 'inherit', cursor: 'pointer' }}>
+                  <span style={{ width: 32, height: 32, borderRadius: 9, display: 'grid', placeItems: 'center', background: '#202c42', color: '#a9bcff', flexShrink: 0 }}>{group.is_private ? <Lock size={15}/> : <Hash size={16}/>}</span>
+                  <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}><strong style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}>{group.name}</strong><small style={{ opacity: .65, fontSize: 11 }}>@{group.username}</small></span>
+                </button>
+                {!group.is_member && !group.is_private && <button type="button" onClick={() => joinGroup(group)} style={{ border: 0, borderRadius: 6, padding: '5px 7px', background: '#253b35', color: '#8be0b1', cursor: 'pointer', fontSize: 11 }}>{language === 'tr' ? 'Katıl' : 'Join'}</button>}
+              </div>
+            ))}
+          </div>
+
           {/* LANGUAGE */}
 
           <div className="sidebar-bottom">
@@ -3635,7 +3811,33 @@ function App({
         <section className="content">
 
 
-          {!selectedFriend ? (
+          {selectedGroup ? (
+            <div className="chat-window" style={{ minHeight: 0 }}>
+              <div className="chat-header">
+                <div className="chat-user" style={{ cursor: 'default' }}>
+                  <div className="chat-avatar-wrap"><div style={{ width: 48, height: 48, borderRadius: 14, background: '#202c42', color: '#a9bcff', display: 'grid', placeItems: 'center' }}>{selectedGroup.is_private ? <Lock size={21}/> : <Hash size={22}/>}</div></div>
+                  <div><strong>{selectedGroup.name}</strong><small>@{selectedGroup.username} · {selectedGroup.is_private ? (language === 'tr' ? 'Gizli grup' : 'Private group') : (language === 'tr' ? 'Herkese açık' : 'Public group')} · {groupMembers.length} {language === 'tr' ? 'üye' : 'members'}</small></div>
+                </div>
+                <div className="chat-actions">
+                  {['owner','admin'].includes(selectedGroup.my_role) && <button type="button" className="chat-action-button" title={language === 'tr' ? 'Arkadaş ekle' : 'Add friend'} onClick={inviteFriendToGroup}><UserPlus size={17}/></button>}
+                  <button type="button" className="chat-action-button close-chat" onClick={() => setSelectedGroup(null)} title={t.close}><X size={18}/></button>
+                </div>
+              </div>
+              <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border-color, rgba(148,163,184,.15))', display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+                {groupMembers.map(member => <button key={member.user_id} type="button" onClick={() => manageGroupMember(member)} title={['owner','admin'].includes(selectedGroup.my_role) && member.role !== 'owner' && member.user_id !== session.user.id ? (language === 'tr' ? 'Üye yönetimi için tıkla' : 'Click to manage member') : member.role} style={{ border: '1px solid var(--border-color, rgba(148,163,184,.2))', borderRadius: 999, padding: '5px 9px', display: 'inline-flex', alignItems: 'center', gap: 5, background: 'transparent', color: 'inherit', cursor: ['owner','admin'].includes(selectedGroup.my_role) && member.role !== 'owner' && member.user_id !== session.user.id ? 'pointer' : 'default', fontSize: 11 }}>
+                  {member.role === 'owner' ? <Crown size={12}/> : member.role === 'admin' ? <UserCog size={12}/> : <Circle size={7}/>}{member.profile.username || member.user_id.slice(0,8)}{member.user_id === session.user.id ? ' (you)' : ''}
+                </button>)}
+              </div>
+              <div className="messages-area">
+                {groupMessages.length === 0 ? <div className="messages-empty"><MessageCircle size={32}/><span>{language === 'tr' ? 'Grupta henüz mesaj yok. İlk mesajı sen gönder.' : 'No group messages yet. Send the first one.'}</span></div> : groupMessages.map(message => <div key={message.id} style={{ display: 'flex', justifyContent: message.sender_id === session.user.id ? 'flex-end' : 'flex-start', marginBottom: 12 }}><div style={{ maxWidth: '75%', padding: '10px 13px', borderRadius: 13, background: message.sender_id === session.user.id ? 'var(--accent, #5b7cfa)' : 'var(--panel-raised, #202b3e)', color: '#f8fafc', overflowWrap: 'anywhere' }}><small style={{ display: 'block', opacity: .72, marginBottom: 4 }}>{message.sender_id === session.user.id ? (language === 'tr' ? 'Sen' : 'You') : (groupMembers.find(m => m.user_id === message.sender_id)?.profile?.username || message.sender_id.slice(0,8))}</small><span style={{ whiteSpace: 'pre-wrap' }}>{message.content}</span><small style={{ display: 'block', opacity: .6, fontSize: 10, marginTop: 5 }}>{new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</small></div></div>)}
+                <div ref={messagesEndRef}/>
+              </div>
+              <form className="chat-input-area" onSubmit={sendGroupMessage}>
+                <input value={groupMessageText} onChange={e => setGroupMessageText(e.target.value)} placeholder={language === 'tr' ? 'Gruba mesaj yaz...' : 'Message the group...'} />
+                <button type="submit" className="send-message-btn" disabled={!groupMessageText.trim()} title={t.sendMessage}><Send size={18}/></button>
+              </form>
+            </div>
+          ) : !selectedFriend ? (
 
             <div className="welcome-panel">
 
@@ -3958,6 +4160,21 @@ function App({
 
       </main>
 
+
+      {groupModalOpen && (
+        <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setGroupModalOpen(false); }}>
+          <div className="profile-modal" role="dialog" aria-modal="true" style={{ maxWidth: 520 }}>
+            <div className="modal-header"><div><h3>{language === 'tr' ? 'Yeni grup oluştur' : language === 'de' ? 'Neue Gruppe erstellen' : 'Create a group'}</h3><p>{language === 'tr' ? 'Grubun adı ve benzersiz kullanıcı adı olacak.' : 'Every group has its own unique username.'}</p></div><button type="button" className="modal-close" onClick={() => setGroupModalOpen(false)}><X size={20}/></button></div>
+            <form className="profile-edit-body" onSubmit={createGroup}>
+              <label className="modal-field"><span>{language === 'tr' ? 'Grup adı' : 'Group name'}</span><input required maxLength={60} value={newGroupName} onChange={e => setNewGroupName(e.target.value)} placeholder={language === 'tr' ? 'Örn. Terra Classic Türkiye' : 'e.g. Terra Classic Community'}/></label>
+              <label className="modal-field"><span>{language === 'tr' ? 'Grup kullanıcı adı' : 'Group username'}</span><input required minLength={3} maxLength={24} value={newGroupUsername} onChange={e => setNewGroupUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))} placeholder="terra_classic_tr"/><small style={{ opacity: .65 }}>@{newGroupUsername || 'group_name'} · 3–24: a-z, 0-9, _</small></label>
+              <label className="modal-field"><span>{language === 'tr' ? 'Açıklama (isteğe bağlı)' : 'Description (optional)'}</span><textarea maxLength={300} value={newGroupDescription} onChange={e => setNewGroupDescription(e.target.value)} rows={3} placeholder={language === 'tr' ? 'Bu grup hakkında...' : 'About this group...'}/></label>
+              <label style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '12px 0', cursor: 'pointer' }}><input type="checkbox" checked={newGroupPrivate} onChange={e => setNewGroupPrivate(e.target.checked)}/><span><strong>{language === 'tr' ? 'Gizli grup' : 'Private group'}</strong><small style={{ display: 'block', opacity: .65 }}>{language === 'tr' ? 'Gizli gruplara yalnızca kurucu/yöneticiler arkadaş ekleyebilir.' : 'Only the owner/admins can add members to private groups.'}</small></span></label>
+              <div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setGroupModalOpen(false)}>{t.cancel}</button><button type="submit" className="primary-button"><Plus size={16}/> {language === 'tr' ? 'Grubu oluştur' : 'Create group'}</button></div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* ===================================================
           FRIEND PROFILE VIEW MODAL (READ-ONLY)
