@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 
 import { supabase } from './lib/supabase';
+import AdminPanel from './AdminPanel';
 import './styles.css';
 
 
@@ -115,7 +116,7 @@ function MarketTicker() {
         // DexScreener is a secondary fallback (it may not index CEX pairs).
         (async () => {
           try {
-            const data = await getJson('https://api-spot.weex.com/api/v3/ticker/24hr?symbol=JURISUSDT');
+            const data = await getJson('https://api-spot.weex.com/api/v3/market/ticker/24hr?symbol=JURISUSDT');
             const ticker = Array.isArray(data) ? data.find((item) => String(item.symbol || '').toUpperCase() === 'JURISUSDT') : data;
             const price = Number(ticker?.lastPrice);
             const change = Number(ticker?.priceChangePercent ?? ticker?.priceChange);
@@ -4861,6 +4862,18 @@ function Root() {
 
   }
 
+  // Admin route is only rendered for an authenticated session.
+  // AdminPanel independently checks the user's server-side admin role.
+  if (window.location.pathname === '/admin') {
+    return (
+      <AdminPanel
+        session={session}
+        onBack={() => {
+          window.location.href = '/';
+        }}
+      />
+    );
+  }
 
   return (
     <App
