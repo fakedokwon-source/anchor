@@ -941,11 +941,13 @@ function App({
   const [newGroupDescription, setNewGroupDescription] = useState('');
   const [newGroupPrivate, setNewGroupPrivate] = useState(false);
   const [editGroupProfileModal, setEditGroupProfileModal] = useState(false);
+  const [groupProfileViewOpen, setGroupProfileViewOpen] = useState(false);
   const [groupProfileDescription, setGroupProfileDescription] = useState('');
   const [groupAvatarFile, setGroupAvatarFile] = useState(null);
   const [groupAvatarPreview, setGroupAvatarPreview] = useState('');
   const [savingGroupProfile, setSavingGroupProfile] = useState(false);
   const [loadingGroups, setLoadingGroups] = useState(false);
+  const [groupSearchText, setGroupSearchText] = useState('');
 
   /*
     Realtime mesaj handler'i useEffect içinde çalıştığı için
@@ -1998,6 +2000,7 @@ function App({
     if (!selectedGroup || selectedGroup.my_role !== 'owner') return;
     setSavingGroupProfile(true);
     let avatarUrl = selectedGroup.avatar_url || null;
+    let saveStage = 'upload';
     try {
       if (groupAvatarFile) {
         const ext = (groupAvatarFile.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '') || 'png';
@@ -2007,6 +2010,7 @@ function App({
         const { data: publicData } = supabase.storage.from('group-avatars').getPublicUrl(path);
         avatarUrl = publicData.publicUrl;
       }
+      saveStage = 'group-row-update';
       const { data, error } = await supabase.from('groups').update({ description: groupProfileDescription.trim(), avatar_url: avatarUrl }).eq('id', selectedGroup.id).select('*').single();
       if (error) throw error;
       setSelectedGroup(current => ({ ...current, ...data }));
@@ -2015,7 +2019,8 @@ function App({
       showToast(language === 'tr' ? 'Grup profili güncellendi.' : 'Group profile updated.');
     } catch (error) {
       console.error('Save group profile error:', error);
-      showToast(language === 'tr' ? `Grup profili kaydedilemedi: ${error.message || 'Hata'}` : `Could not save group profile: ${error.message || 'Error'}`);
+      const stageText = saveStage === 'upload' ? (language === 'tr' ? 'Resim yükleme izni' : 'image upload permission') : (language === 'tr' ? 'Grup bilgilerini güncelleme izni' : 'group update permission');
+      showToast(language === 'tr' ? `${stageText} hatası: ${error.message || 'Hata'}` : `${stageText} error: ${error.message || 'Error'}`);
     } finally {
       setSavingGroupProfile(false);
     }
@@ -2082,9 +2087,9 @@ function App({
     }
 
 
-    setMessages(
-      data || []
-    );
+    const { data: hiddenRow } = await supabase.from('anchor_hidden_chats').select('hidden_before').eq('user_id', userId).eq('other_user_id', friend.id).maybeSingle();
+    const visibleMessages = hiddenRow?.hidden_before ? (data || []).filter(message => message.created_at > hiddenRow.hidden_before) : (data || []);
+    setMessages(visibleMessages);
 
 
     await markMessagesAsRead(
@@ -2103,6 +2108,48 @@ function App({
     setLoadingMessages(false);
   };
 
+
+  const removeFriend = async (friend) => {
+    if (!friend?.id || !session?.user?.id) return;
+    if (!window.confirm(language === 'tr' ? `@${friend.username} arkadaşlıktan çıkarılsın mı?` : `Remove @${friend.username} from your friends?`)) return;
+    const uid = session.user.id;
+    const { error } = await supabase.from('friendships').delete().or(`and(user_id.eq.${uid},friend_id.eq.${friend.id}),and(user_id.eq.${friend.id},friend_id.eq.${uid})`);
+    if (error) { showToast(error.message || t.generic); return; }
+    setFriends(current => current.filter(item => item.id !== friend.id));
+    if (selectedFriend?.id === friend.id) { setSelectedFriend(null); setMessages([]); }
+    await loadFriends(uid);
+    showToast(language === 'tr' ? 'Arkadaş kaldırıldı.' : 'Friend removed.');
+  };
+
+  const clearChatForMe = async (friend) => {
+    if (!friend?.id || !session?.user?.id) return;
+    if (!window.confirm(language === 'tr' ? 'Bu sohbet yalnızca senin hesabında temizlensin mi? Karşı tarafın sohbeti etkilenmez.' : 'Clear this conversation only for your account? The other person will keep their chat.')) return;
+    const { error } = await supabase.from('anchor_hidden_chats').upsert({ user_id: session.user.id, other_user_id: friend.id, hidden_before: new Date().toISOString() }, { onConflict: 'user_id,other_user_id' });
+    if (error) { showToast((language === 'tr' ? 'Önce sohbet görünürlüğü SQL kurulumunu çalıştır: ' : 'Run the chat visibility SQL setup first: ') + error.message); return; }
+    setMessages([]);
+    showToast(language === 'tr' ? 'Sohbet yalnızca senin hesabından temizlendi.' : 'Chat cleared for your account only.');
+  };
+
+  const leaveGroup = async () => {
+    if (!selectedGroup || !session?.user?.id) return;
+    if (!window.confirm(language === 'tr' ? 'Gruptan ayrılmak istiyor musun? Grup diğer üyeler için kalacak.' : 'Leave this group? It will remain for other members.')) return;
+    if (selectedGroup.my_role === 'owner') {
+      const { data: nextMembers, error: rosterError } = await supabase.from('group_members').select('user_id').eq('group_id', selectedGroup.id).neq('user_id', session.user.id).order('joined_at', { ascending: true }).limit(1);
+      if (rosterError) { showToast(rosterError.message || t.generic); return; }
+      if (nextMembers?.length) {
+        const { error: promoteError } = await supabase.from('group_members').update({ role: 'owner' }).eq('group_id', selectedGroup.id).eq('user_id', nextMembers[0].user_id);
+        if (promoteError) { showToast(language === 'tr' ? 'Gruptan ayrılmadan önce yeni yönetici atanamadı.' : 'Could not assign a new owner before leaving.'); return; }
+      } else {
+        const { error: groupDeleteError } = await supabase.from('groups').delete().eq('id', selectedGroup.id);
+        if (groupDeleteError) { showToast(groupDeleteError.message || t.generic); return; }
+      }
+    }
+    const { error } = await supabase.from('group_members').delete().eq('group_id', selectedGroup.id).eq('user_id', session.user.id);
+    if (error) { showToast(error.message || t.generic); return; }
+    setSelectedGroup(null); setGroupMessages([]); setGroupMembers([]);
+    await loadGroups();
+    showToast(language === 'tr' ? 'Gruptan ayrıldın.' : 'You left the group.');
+  };
 
   /* =======================================================
      SELECT FRIEND
@@ -3598,6 +3645,8 @@ function App({
                     <div
                       className="search-user-item"
                       key={user.id}
+                      onClick={() => { const friend = friends.find(item => item.id === user.id); if (friend) selectFriend(friend); }}
+                      style={{ cursor: friends.some(friend => friend.id === user.id) ? 'pointer' : 'default' }}
                     >
 
                       <Avatar
@@ -3620,18 +3669,8 @@ function App({
                       </div>
 
 
-                      <button
-                        type="button"
-                        className="small-action-button"
-                        onClick={() =>
-                          sendFriendRequest(
-                            user.id
-                          )
-                        }
-                      >
-                        <UserPlus
-                          size={15}
-                        />
+                      <button type="button" className="small-action-button" title={friends.some(friend => friend.id === user.id) ? (language === 'tr' ? 'Mesaj gönder' : 'Message') : t.add} onClick={(event) => { event.stopPropagation(); const friend = friends.find(item => item.id === user.id); if (friend) selectFriend(friend); else sendFriendRequest(user.id); }}>
+                        {friends.some(friend => friend.id === user.id) ? <MessageCircle size={15}/> : <UserPlus size={15}/>}
                       </button>
 
                     </div>
@@ -3781,10 +3820,10 @@ function App({
 
                 {friends.map(
                   (friend) => (
-                    <FriendItem
-                      key={friend.id}
-                      friend={friend}
-                    />
+                    <div key={friend.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}><FriendItem friend={friend} /></div>
+                      <button type="button" className="small-action-button" title={language === 'tr' ? 'Arkadaşı sil' : 'Remove friend'} onClick={() => removeFriend(friend)}><UserMinus size={14}/></button>
+                    </div>
                   )
                 )}
 
@@ -3801,7 +3840,7 @@ function App({
               <span>{language === 'tr' ? 'Gruplar' : language === 'de' ? 'Gruppen' : 'Groups'}</span>
               <button type="button" onClick={() => setGroupModalOpen(true)} title={language === 'tr' ? 'Grup oluştur' : 'Create group'} style={{ marginLeft: 'auto', border: 0, borderRadius: 7, padding: 5, cursor: 'pointer', background: 'var(--accent, #5b7cfa)', color: 'white', display: 'inline-flex' }}><Plus size={15}/></button>
             </div>
-            {loadingGroups ? <div className="empty-small">{t.checking}</div> : groups.length === 0 ? <div className="empty-small">{language === 'tr' ? 'Henüz grup yok. + ile oluştur.' : 'No groups yet. Create one with +.'}</div> : groups.map(group => (
+            {loadingGroups ? <div className="empty-small">{t.checking}</div> : groups.filter(group => group.is_member).length === 0 ? <div className="empty-small">{language === 'tr' ? 'Henüz katıldığın grup yok.' : 'You have not joined any groups yet.'}</div> : groups.filter(group => group.is_member).map(group => (
               <div key={group.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 5px', borderRadius: 8, background: selectedGroup?.id === group.id ? 'rgba(91,124,250,.13)' : 'transparent', marginTop: 3 }}>
                 <button type="button" onClick={() => group.is_member ? (setSelectedFriend(null), setSelectedGroup(group), loadGroupConversation(group, true)) : joinGroup(group)} style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, textAlign: 'left', border: 0, background: 'transparent', color: 'inherit', cursor: 'pointer' }}>
                   {group.avatar_url ? <img src={group.avatar_url} alt="" style={{ width: 32, height: 32, borderRadius: 9, objectFit: 'cover', flexShrink: 0 }}/> : <span style={{ width: 32, height: 32, borderRadius: 9, display: 'grid', placeItems: 'center', background: '#202c42', color: '#a9bcff', flexShrink: 0 }}>{group.is_private ? <Lock size={15}/> : <Hash size={16}/>}</span>}
@@ -3810,6 +3849,12 @@ function App({
                 {!group.is_member && !group.is_private && <button type="button" onClick={() => joinGroup(group)} style={{ border: 0, borderRadius: 6, padding: '5px 7px', background: '#253b35', color: '#8be0b1', cursor: 'pointer', fontSize: 11 }}>{language === 'tr' ? 'Katıl' : 'Join'}</button>}
               </div>
             ))}
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border-color, rgba(148,163,184,.14))' }}>
+              <div className="section-title"><Search size={14}/><span>{language === 'tr' ? 'Herkese açık grup ara' : 'Find public groups'}</span></div>
+              <input value={groupSearchText} onChange={e => setGroupSearchText(e.target.value)} placeholder={language === 'tr' ? 'Grup adı veya @kullanıcı adı' : 'Group name or @username'} style={{ width: '100%', boxSizing: 'border-box', margin: '6px 0', padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border-color, rgba(148,163,184,.2))', background: 'var(--input-bg, transparent)', color: 'inherit' }}/>
+              {groupSearchText.trim() && groups.filter(group => !group.is_private && !group.is_member && `${group.name} ${group.username}`.toLowerCase().includes(groupSearchText.trim().replace(/^@/, '').toLowerCase())).map(group => <div key={`discover-${group.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 4px' }}><span style={{ flex: 1, minWidth: 0, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis' }}>{group.name} <small style={{ opacity: .6 }}>@{group.username}</small></span><button type="button" onClick={() => joinGroup(group)} style={{ border: 0, borderRadius: 6, padding: '5px 7px', background: '#253b35', color: '#8be0b1', cursor: 'pointer', fontSize: 11 }}>{language === 'tr' ? 'Katıl' : 'Join'}</button></div>)}
+              {groupSearchText.trim() && groups.filter(group => !group.is_private && !group.is_member && `${group.name} ${group.username}`.toLowerCase().includes(groupSearchText.trim().replace(/^@/, '').toLowerCase())).length === 0 && <div className="empty-small">{language === 'tr' ? 'Katılabileceğin grup bulunamadı.' : 'No public groups found.'}</div>}
+            </div>
           </div>
 
           {/* LANGUAGE */}
@@ -3866,12 +3911,15 @@ function App({
             <div className="chat-window" style={{ minHeight: 0 }}>
               <div className="chat-header">
                 <div className="chat-user" style={{ cursor: 'default' }}>
-                  <div className="chat-avatar-wrap">{selectedGroup.avatar_url ? <img src={selectedGroup.avatar_url} alt={selectedGroup.name} style={{ width: 48, height: 48, borderRadius: 14, objectFit: 'cover' }}/> : <div style={{ width: 48, height: 48, borderRadius: 14, background: '#202c42', color: '#a9bcff', display: 'grid', placeItems: 'center' }}>{selectedGroup.is_private ? <Lock size={21}/> : <Hash size={22}/>}</div>}</div>
-                  <div><strong>{selectedGroup.name}</strong><small>@{selectedGroup.username} · {selectedGroup.is_private ? (language === 'tr' ? 'Gizli grup' : 'Private group') : (language === 'tr' ? 'Herkese açık' : 'Public group')} · {groupMembers.length} {language === 'tr' ? 'üye' : 'members'}{selectedGroup.description ? ` · ${selectedGroup.description}` : ''}</small></div>
+                  <button type="button" onClick={() => setGroupProfileViewOpen(true)} title={language === 'tr' ? 'Grup hakkında' : 'Group information'} style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, padding: 0, border: 0, background: 'transparent', color: 'inherit', textAlign: 'left', cursor: 'pointer' }}>
+                    <div className="chat-avatar-wrap">{selectedGroup.avatar_url ? <img src={selectedGroup.avatar_url} alt={selectedGroup.name} style={{ width: 48, height: 48, borderRadius: 14, objectFit: 'cover' }}/> : <div style={{ width: 48, height: 48, borderRadius: 14, background: '#202c42', color: '#a9bcff', display: 'grid', placeItems: 'center' }}>{selectedGroup.is_private ? <Lock size={21}/> : <Hash size={22}/>}</div>}</div>
+                    <div style={{ minWidth: 0 }}><strong>{selectedGroup.name}</strong><small style={{ display: 'block' }}>@{selectedGroup.username} · {selectedGroup.is_private ? (language === 'tr' ? 'Gizli grup' : 'Private group') : (language === 'tr' ? 'Herkese açık' : 'Public group')} · {groupMembers.length} {language === 'tr' ? 'üye' : 'members'}</small><small style={{ display: 'block', opacity: .65 }}>{language === 'tr' ? 'Grup bilgilerini görmek için tıkla' : 'Click to view group info'}</small></div>
+                  </button>
                 </div>
                 <div className="chat-actions">
                   {selectedGroup.my_role === 'owner' && <button type="button" className="chat-action-button" title={language === 'tr' ? 'Grup profilini düzenle' : 'Edit group profile'} onClick={openGroupProfileEditor}><Pencil size={17}/></button>}
                   {['owner','admin'].includes(selectedGroup.my_role) && <button type="button" className="chat-action-button" title={language === 'tr' ? 'Arkadaş ekle' : 'Add friend'} onClick={inviteFriendToGroup}><UserPlus size={17}/></button>}
+                  <button type="button" className="chat-action-button" title={language === 'tr' ? 'Gruptan ayrıl' : 'Leave group'} onClick={leaveGroup}><LogOut size={16}/></button>
                   <button type="button" className="chat-action-button close-chat" onClick={() => setSelectedGroup(null)} title={t.close}><X size={18}/></button>
                 </div>
               </div>
@@ -4039,6 +4087,7 @@ function App({
                   </button>
 
 
+                  <button type="button" className="chat-action-button" title={language === 'tr' ? 'Sohbeti yalnızca benden temizle' : 'Clear chat for me'} onClick={() => clearChatForMe(selectedFriend)}><Trash2 size={16}/></button>
                   <button
                     type="button"
                     className="chat-action-button close-chat"
@@ -4212,6 +4261,21 @@ function App({
 
       </main>
 
+
+      {groupProfileViewOpen && selectedGroup && (
+        <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setGroupProfileViewOpen(false); }}>
+          <div className="profile-modal" role="dialog" aria-modal="true" style={{ maxWidth: 480 }}>
+            <div className="modal-header"><div><h3>{language === 'tr' ? 'Grup profili' : 'Group profile'}</h3><p>@{selectedGroup.username}</p></div><button type="button" className="modal-close" onClick={() => setGroupProfileViewOpen(false)}><X size={20}/></button></div>
+            <div className="profile-edit-body" style={{ textAlign: 'center', alignItems: 'stretch' }}>
+              {selectedGroup.avatar_url ? <img src={selectedGroup.avatar_url} alt={selectedGroup.name} style={{ width: 112, height: 112, borderRadius: 24, objectFit: 'cover', alignSelf: 'center' }}/> : <div style={{ width: 112, height: 112, borderRadius: 24, background: '#202c42', color: '#a9bcff', display: 'grid', placeItems: 'center', alignSelf: 'center' }}>{selectedGroup.is_private ? <Lock size={38}/> : <Hash size={40}/>}</div>}
+              <h2 style={{ margin: '4px 0 0' }}>{selectedGroup.name}</h2>
+              <p style={{ margin: 0, opacity: .7 }}>{selectedGroup.is_private ? (language === 'tr' ? 'Gizli grup' : 'Private group') : (language === 'tr' ? 'Herkese açık grup' : 'Public group')} · {groupMembers.length} {language === 'tr' ? 'üye' : 'members'}</p>
+              <div style={{ textAlign: 'left', marginTop: 12, padding: 14, borderRadius: 12, background: 'var(--panel-raised, rgba(148,163,184,.08))' }}><strong>{language === 'tr' ? 'Hakkında' : 'About'}</strong><p style={{ margin: '8px 0 0', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{selectedGroup.description?.trim() || (language === 'tr' ? 'Bu grup için henüz açıklama eklenmemiş.' : 'No description has been added yet.')}</p></div>
+              {selectedGroup.my_role === 'owner' && <button type="button" className="primary-button" onClick={() => { setGroupProfileViewOpen(false); openGroupProfileEditor(); }}>{language === 'tr' ? 'Profili düzenle' : 'Edit profile'}</button>}
+            </div>
+          </div>
+        </div>
+      )}
 
       {editGroupProfileModal && selectedGroup && (
         <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) setEditGroupProfileModal(false); }}>
