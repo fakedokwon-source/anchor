@@ -619,320 +619,93 @@ const translations = {
    AUTH
 ========================================================= */
 
-function Auth({
-  language,
-  setLanguage,
-  onAuth
-}) {
-  const t = translations[language];
-
-  const [mode, setMode] =
-    useState('login');
-
-  const [username, setUsername] =
-    useState('');
-
-  const [email, setEmail] =
-    useState('');
-
-  const [password, setPassword] =
-    useState('');
-
-  const [loading, setLoading] =
-    useState(false);
-
-  const [error, setError] =
-    useState('');
-
-  const [success, setSuccess] =
-    useState('');
-
+function Auth({ language, setLanguage, onAuth }) {
+  const t = translations[language] || translations.en;
+  const [mode, setMode] = useState('login');
+  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
   const submit = async (event) => {
     event.preventDefault();
-
     setError('');
     setSuccess('');
-
-    if (mode === 'signup') {
-      if (!username.trim()) {
-        setError(t.invalidUser);
-        return;
-      }
-    }
-
-    if (!email.trim()) {
-      setError(t.invalidEmail);
-      return;
-    }
-
-    if (password.length < 6) {
-      setError(t.shortPass);
-      return;
-    }
-
+    if (mode === 'signup' && !username.trim()) { setError(t.invalidUser); return; }
+    if (!email.trim()) { setError(t.invalidEmail); return; }
+    if (password.length < 6) { setError(t.shortPass); return; }
     setLoading(true);
-
     try {
       if (mode === 'login') {
-        const {
-          data,
-          error: loginError
-        } = await supabase.auth.signInWithPassword({
-          email: email.trim(),
-          password
-        });
-
-        if (loginError) {
-          throw loginError;
-        }
-
-        if (data?.user) {
-          onAuth(data.user);
-        }
+        const { data, error: loginError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+        if (loginError) throw loginError;
+        if (data?.user) onAuth(data.user);
       } else {
-        const {
-          data,
-          error: signupError
-        } = await supabase.auth.signUp({
-          email: email.trim(),
-          password,
-          options: {
-            data: {
-              username: username.trim()
-            }
-          }
+        const { data, error: signupError } = await supabase.auth.signUp({
+          email: email.trim(), password, options: { data: { username: username.trim() } }
         });
-
-        if (signupError) {
-          throw signupError;
-        }
-
+        if (signupError) throw signupError;
         if (data?.user) {
-          await supabase
-            .from('profiles')
-            .upsert({
-              id: data.user.id,
-              username: username.trim(),
-              about: ''
-            });
-
-          if (data.session) {
-            onAuth(data.user);
-          } else {
-            setSuccess(
-              `${t.created} Check your email if confirmation is enabled.`
-            );
-
-            setMode('login');
-          }
+          const { error: profileError } = await supabase.from('profiles').upsert({ id: data.user.id, username: username.trim(), about: '' });
+          if (profileError) throw profileError;
+          if (data.session) onAuth(data.user);
+          else { setSuccess(`${t.created} Check your email if confirmation is enabled.`); setMode('login'); }
         }
       }
     } catch (err) {
       console.error(err);
-
-      setError(
-        err?.message ||
-        t.generic
-      );
-    } finally {
-      setLoading(false);
-    }
+      setError(err?.message || t.generic);
+    } finally { setLoading(false); }
   };
 
+  const copy = language === 'tr'
+    ? { tagline: 'Geçmişin sohbetleri, bugünün arkadaşlıkları.', description: 'Eski dostlarınla yeniden buluş. Yeni sohbetlere başla. Anılarını yaşat.', signup: 'Kayıt Ol', login: 'Giriş Yap', support: 'Yardıma mı ihtiyacın var? @support', admin: 'Yönetici: @stablekwon' }
+    : language === 'de'
+      ? { tagline: 'Alte Gespräche. Neue Erinnerungen.', description: 'Finde alte Freunde wieder, beginne neue Gespräche und halte Erinnerungen lebendig.', signup: 'Registrieren', login: 'Anmelden', support: 'Brauchst du Hilfe? @support', admin: 'Administration: @stablekwon' }
+      : { tagline: 'Reconnect. Relive. Chat.', description: 'A new home for old-school conversations, friendships and memories.', signup: 'Create Account', login: 'Log In', support: 'Need help? Contact @support', admin: 'Administrator: @stablekwon' };
 
   return (
-    <div className="auth-page">
-
-      <div className="auth-card">
-
-        <div
-          className="auth-brand"
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: '8px'
-          }}
-        >
-          <Anchor size={38} strokeWidth={1.8} aria-hidden="true" />
-          <div className="brand-name">ANCHOR</div>
-          <p style={{ margin: 0 }}>Reconnect. Relive. Chat.</p>
+    <main className="anchor-welcome-page">
+      <div className="anchor-welcome-glow anchor-welcome-glow-one" />
+      <div className="anchor-welcome-glow anchor-welcome-glow-two" />
+      <header className="anchor-welcome-topbar">
+        <div className="anchor-welcome-mini-brand"><img src="/anchor-logo.png" alt="Anchor" /><span>ANCHOR</span></div>
+        <label className="anchor-language-select-label" aria-label={t.language}>
+          <Globe2 size={16} />
+          <select value={language} onChange={(e) => setLanguage(e.target.value)} aria-label={t.language}>
+            <option value="en">English</option><option value="tr">Türkçe</option><option value="de">Deutsch</option>
+          </select>
+        </label>
+      </header>
+      <section className="anchor-welcome-hero">
+        <div className="anchor-welcome-logo-wrap"><div className="anchor-welcome-logo-halo" /><img className="anchor-welcome-logo" src="/anchor-logo.png" alt="Anchor anchor logo" /></div>
+        <div className="anchor-welcome-eyebrow">A PLACE TO RECONNECT</div>
+        <h1>Anchor<span>.</span></h1>
+        <p className="anchor-welcome-tagline">{copy.tagline}</p>
+        <p className="anchor-welcome-description">{copy.description}</p>
+        <div className="anchor-welcome-actions">
+          <button className="anchor-welcome-primary" type="button" onClick={() => { setMode('signup'); setError(''); setSuccess(''); document.getElementById('anchor-auth-form')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }}>{copy.signup}<UserPlus size={17} /></button>
+          <button className="anchor-welcome-secondary" type="button" onClick={() => { setMode('login'); setError(''); setSuccess(''); document.getElementById('anchor-auth-form')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }}>{copy.login}<LogOut size={17} /></button>
         </div>
-
-        <div className="auth-title">
-          <h1>
-            {mode === 'login'
-              ? t.welcomeBack
-              : t.welcome}
-          </h1>
-
-          <p>
-            {t.choose}
-          </p>
+        <div className="anchor-welcome-auth-panel" id="anchor-auth-form">
+          <div className="anchor-welcome-auth-heading"><span>{mode === 'signup' ? t.switchSignup : t.login}</span><small>{mode === 'signup' ? t.welcome : t.welcomeBack}</small></div>
+          <form className="auth-form anchor-welcome-form" onSubmit={submit}>
+            {mode === 'signup' && <label><span>{t.username}</span><input value={username} onChange={(e) => setUsername(e.target.value)} placeholder={t.placeholder} autoComplete="username" /></label>}
+            <label><span>{t.email}</span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t.emailPlaceholder} autoComplete="email" /></label>
+            <label><span>{t.password}</span><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t.passwordPlaceholder} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} /></label>
+            {error && <div className="form-error">{error}</div>}{success && <div className="form-success">{success}</div>}
+            <button className="primary-button anchor-welcome-submit" type="submit" disabled={loading}>{loading ? t.checking : mode === 'login' ? t.login : t.switchSignup}</button>
+          </form>
+          <div className="auth-switch anchor-welcome-switch">{mode === 'login' ? <><span>{t.new}</span><button type="button" onClick={() => { setMode('signup'); setError(''); setSuccess(''); }}>{t.switchSignup}</button></> : <><span>{t.have}</span><button type="button" onClick={() => { setMode('login'); setError(''); setSuccess(''); }}>{t.switchLogin}</button></>}</div>
         </div>
-
-
-        <div className="language-row">
-
-          {['en', 'tr', 'de'].map(
-            (item) => (
-              <button
-                key={item}
-                type="button"
-                className={
-                  language === item
-                    ? 'language-button active'
-                    : 'language-button'
-                }
-                onClick={() =>
-                  setLanguage(item)
-                }
-              >
-                {item.toUpperCase()}
-              </button>
-            )
-          )}
-
-        </div>
-
-
-        <form
-          className="auth-form"
-          onSubmit={submit}
-        >
-
-          {mode === 'signup' && (
-            <label>
-              <span>
-                {t.username}
-              </span>
-
-              <input
-                value={username}
-                onChange={(e) =>
-                  setUsername(e.target.value)
-                }
-                placeholder={t.placeholder}
-                autoComplete="username"
-              />
-            </label>
-          )}
-
-
-          <label>
-            <span>
-              {t.email}
-            </span>
-
-            <input
-              type="email"
-              value={email}
-              onChange={(e) =>
-                setEmail(e.target.value)
-              }
-              placeholder={t.emailPlaceholder}
-              autoComplete="email"
-            />
-          </label>
-
-
-          <label>
-            <span>
-              {t.password}
-            </span>
-
-            <input
-              type="password"
-              value={password}
-              onChange={(e) =>
-                setPassword(e.target.value)
-              }
-              placeholder={t.passwordPlaceholder}
-              autoComplete={
-                mode === 'login'
-                  ? 'current-password'
-                  : 'new-password'
-              }
-            />
-          </label>
-
-
-          {error && (
-            <div className="form-error">
-              {error}
-            </div>
-          )}
-
-
-          {success && (
-            <div className="form-success">
-              {success}
-            </div>
-          )}
-
-
-          <button
-            className="primary-button"
-            type="submit"
-            disabled={loading}
-          >
-            {loading
-              ? t.checking
-              : mode === 'login'
-                ? t.login
-                : t.switchSignup}
-          </button>
-
-        </form>
-
-
-        <div className="auth-switch">
-
-          {mode === 'login' ? (
-            <>
-              <span>
-                {t.new}
-              </span>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setMode('signup');
-                  setError('');
-                  setSuccess('');
-                }}
-              >
-                {t.switchSignup}
-              </button>
-            </>
-          ) : (
-            <>
-              <span>
-                {t.have}
-              </span>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setMode('login');
-                  setError('');
-                  setSuccess('');
-                }}
-              >
-                {t.switchLogin}
-              </button>
-            </>
-          )}
-
-        </div>
-
-      </div>
-
-    </div>
+        <div className="anchor-welcome-support">{copy.support}<span>•</span>{copy.admin}</div>
+      </section>
+      <footer className="anchor-welcome-footer">Anchor · 2026</footer>
+    </main>
   );
 }
-
 
 /* =========================================================
    MESSAGE ATTACHMENT HELPERS
