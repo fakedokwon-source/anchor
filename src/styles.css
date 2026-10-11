@@ -2841,3 +2841,299 @@ img {
   }
 }
 ```
+/* ANCHOR mobile layout repair — append to the END of src/styles.css */
+@media (max-width: 760px) {
+  html, body, #root {
+    width: 100%;
+    min-width: 0;
+    min-height: 100%;
+    height: auto !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+  }
+
+  body {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  #root {
+    display: block !important;
+  }
+
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    width: 100%;
+    min-height: 76px;
+    padding: 12px 14px;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .topbar-right {
+    min-width: 0;
+    gap: 6px;
+  }
+
+  .top-profile-button {
+    min-width: 0;
+    max-width: 46vw;
+  }
+
+  .top-profile-button strong,
+  .top-profile-button small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .anchor-market-ticker {
+    position: relative;
+    z-index: 1;
+  }
+
+  .dashboard {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    gap: 12px !important;
+    padding: 12px !important;
+  }
+
+  .sidebar {
+    position: relative !important;
+    inset: auto !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 0 0 auto !important;
+    gap: 12px;
+    padding: 12px !important;
+    border-radius: 16px;
+    box-sizing: border-box !important;
+  }
+
+  .sidebar-profile,
+  .search-box,
+  .search-results,
+  .sidebar-section,
+  .friends-section,
+  .sidebar-bottom {
+    position: relative !important;
+    inset: auto !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    flex: 0 0 auto !important;
+    box-sizing: border-box !important;
+  }
+
+  .sidebar-section {
+    margin-top: 8px !important;
+  }
+
+  .friends-list,
+  .request-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .friend-item,
+  .request-item,
+  .search-user-item {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .sidebar-bottom {
+    margin-top: 8px !important;
+    padding-top: 14px;
+    border-top: 1px solid var(--border-color, rgba(148,163,184,.18));
+  }
+
+  .language-switcher {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+    width: 100%;
+  }
+
+  .language-switcher button {
+    min-width: 0;
+    min-height: 42px;
+  }
+
+  .content {
+    position: relative !important;
+    inset: auto !important;
+    z-index: auto !important;
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    flex: 0 0 auto !important;
+    box-sizing: border-box !important;
+  }
+
+  .welcome-panel {
+    position: relative !important;
+    inset: auto !important;
+    transform: none !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: 340px !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 28px 18px !important;
+    box-sizing: border-box !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+    text-align: center !important;
+    overflow-wrap: anywhere;
+  }
+
+  .welcome-panel h2 {
+    font-size: clamp(24px, 7vw, 34px) !important;
+    line-height: 1.2;
+    margin: 18px 0 10px;
+  }
+
+  .welcome-panel p {
+    max-width: 100%;
+    line-height: 1.5;
+    margin: 0;
+  }
+
+  .welcome-brand {
+    width: 100%;
+    margin-top: 28px !important;
+    overflow-wrap: anywhere;
+  }
+
+  .welcome-brand .brand-name {
+    font-size: clamp(28px, 9vw, 44px) !important;
+  }
+
+  .chat-window {
+    position: relative !important;
+    inset: auto !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: min(68dvh, 680px) !important;
+    min-height: 420px !important;
+    max-height: none !important;
+    margin: 0 !important;
+    overflow: hidden !important;
+    box-sizing: border-box !important;
+  }
+
+  .chat-header {
+    min-width: 0;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .chat-user {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .chat-user > div:last-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .chat-actions {
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
+
+  .messages-area {
+    min-height: 0;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+  }
+
+  .chat-input-area {
+    flex: 0 0 auto;
+    min-width: 0;
+    gap: 8px;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+
+  .chat-input-area input {
+    min-width: 0;
+    width: 100%;
+  }
+
+  /* Prevent modals from exceeding the mobile viewport. */
+  .modal-overlay,
+  .profile-modal-overlay,
+  .group-modal-overlay {
+    padding: 12px !important;
+    align-items: center !important;
+    overflow-y: auto !important;
+  }
+
+  .modal,
+  .profile-modal,
+  .group-modal {
+    width: 100% !important;
+    max-width: 100% !important;
+    max-height: calc(100dvh - 24px) !important;
+    overflow-y: auto !important;
+    box-sizing: border-box !important;
+  }
+}
+
+@media (max-width: 380px) {
+  .topbar {
+    padding-inline: 10px !important;
+  }
+
+  .top-profile-button {
+    max-width: 38vw;
+  }
+
+  .dashboard {
+    padding: 8px !important;
+  }
+
+  .sidebar {
+    padding: 10px !important;
+  }
+
+  .welcome-panel {
+    min-height: 300px !important;
+    padding: 22px 12px !important;
+  }
+
+  .chat-window {
+    min-height: 380px !important;
+  }
+}
+
