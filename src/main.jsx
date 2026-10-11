@@ -4252,6 +4252,29 @@ function App({
               </div>
 
 
+              {/* PRIVACY / ENCRYPTION STATUS */}
+              <div className="chat-security-banner" role="note">
+                <span className="chat-security-icon" aria-hidden="true">
+                  <Lock size={14} />
+                </span>
+                <span className="chat-security-copy">
+                  <strong>
+                    {language === 'tr'
+                      ? 'ANCHOR özel sohbet'
+                      : language === 'de'
+                        ? 'ANCHOR Privat-Chat'
+                        : 'ANCHOR private chat'}
+                  </strong>
+                  <span>
+                    {language === 'tr'
+                      ? 'Bu sohbet uçtan uca şifrelenmiştir.'
+                      : language === 'de'
+                        ? 'Dieser Chat ist Ende-zu-Ende verschlüsselt.'
+                        : 'This chat is end-to-end encrypted.'}
+                  </span>
+                </span>
+              </div>
+
               {/* BLOCK NOTICE */}
 
               {isBlocked(
