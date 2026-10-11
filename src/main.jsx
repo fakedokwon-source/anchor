@@ -3489,8 +3489,19 @@ function App({
         supabase.storage.from('anchor-chat-media').createSignedUrl(attachment.path, 3600)
           .then(({ data, error }) => {
             if (!active) return;
-            if (error) console.error('Attachment URL error:', error);
+            if (error) {
+              console.error('Attachment URL error:', error);
+              setAttachmentUrl('');
+              setAttachmentLoading(false);
+              return;
+            }
             setAttachmentUrl(data?.signedUrl || '');
+            setAttachmentLoading(false);
+          })
+          .catch((urlError) => {
+            if (!active) return;
+            console.error('Attachment URL request failed:', urlError);
+            setAttachmentUrl('');
             setAttachmentLoading(false);
           });
         return () => { active = false; };
@@ -3542,7 +3553,7 @@ function App({
                     </a>
                   )
                 ) : (
-                  <span>{language === 'tr' ? 'Dosya açılamadı.' : language === 'de' ? 'Datei kann nicht geöffnet werden.' : 'Could not open attachment.'}</span>
+                  <span>{language === 'tr' ? 'Dosya açılamadı. Supabase Storage izinlerini ve dosyanın varlığını kontrol edin.' : language === 'de' ? 'Datei kann nicht geöffnet werden. Storage-Berechtigungen und Datei prüfen.' : 'Could not open attachment. Check Storage permissions and whether the file exists.'}</span>
                 )}
               </div>
             ) : (
