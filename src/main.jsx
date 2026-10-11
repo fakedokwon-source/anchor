@@ -32,15 +32,11 @@ import {
   Crown,
   UserCog,
   ImagePlus,
-  FileText,
-  Download,
   Pencil,
-  Bookmark,
-  Anchor
+  Bookmark
 } from 'lucide-react';
 
 import { supabase } from './lib/supabase';
-import AdminPanel from './AdminPanel';
 import './styles.css';
 
 
@@ -119,7 +115,7 @@ function MarketTicker() {
         // DexScreener is a secondary fallback (it may not index CEX pairs).
         (async () => {
           try {
-            const data = await getJson('https://api-spot.weex.com/api/v3/market/ticker/24hr?symbol=JURISUSDT');
+            const data = await getJson('https://api-spot.weex.com/api/v3/ticker/24hr?symbol=JURISUSDT');
             const ticker = Array.isArray(data) ? data.find((item) => String(item.symbol || '').toUpperCase() === 'JURISUSDT') : data;
             const price = Number(ticker?.lastPrice);
             const change = Number(ticker?.priceChangePercent ?? ticker?.priceChange);
@@ -395,8 +391,6 @@ const translations = {
     add: 'Add friend',
     empty: 'No results',
     welcomeBack: 'Welcome back',
-    selectFriendPrompt: 'Select a friend to start a conversation.',
-    supportContact: 'For support, contact @support. To speak with the administrator, contact @stablekwon.' ,
     logout: 'Logout',
     aboutDefault: 'No information yet.',
     save: 'Save',
@@ -477,8 +471,6 @@ const translations = {
     add: 'Arkadaş ekle',
     empty: 'Sonuç yok',
     welcomeBack: 'Tekrar hoş geldin',
-    selectFriendPrompt: 'Sohbete başlamak için bir arkadaş seç.',
-    supportContact: 'Destek için @support, yöneticiyle görüşmek için @stablekwon hesabıyla iletişime geçebilirsiniz.' ,
     logout: 'Çıkış yap',
     aboutDefault: 'Henüz bilgi yok.',
     save: 'Kaydet',
@@ -559,8 +551,6 @@ const translations = {
     add: 'Freund hinzufügen',
     empty: 'Keine Ergebnisse',
     welcomeBack: 'Willkommen zurück',
-    selectFriendPrompt: 'Wähle einen Freund aus, um ein Gespräch zu beginnen.',
-    supportContact: 'Für Support kontaktiere @support. Um mit der Administration zu sprechen, kontaktiere @stablekwon.' ,
     logout: 'Abmelden',
     aboutDefault: 'Noch keine Informationen.',
     save: 'Speichern',
@@ -746,18 +736,8 @@ function Auth({
 
       <div className="auth-card">
 
-        <div
-          className="auth-brand"
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            gap: '8px'
-          }}
-        >
-          <Anchor size={38} strokeWidth={1.8} aria-hidden="true" />
-          <div className="brand-name">ANCHOR</div>
-          <p style={{ margin: 0 }}>Reconnect. Relive. Chat.</p>
+        <div className="auth-brand">
+          <Logo />
         </div>
 
         <div className="auth-title">
@@ -935,182 +915,6 @@ function Auth({
 
 
 /* =========================================================
-   MESSAGE ATTACHMENT HELPERS
-========================================================= */
-function getMessageAttachment(content) {
-  try {
-    const value = JSON.parse(content);
-    return value?.anchorAttachment === true ? value : null;
-  } catch {
-    return null;
-  }
-}
-
-function MessageItem({ message, session, t, language, formatTime, saveMessageToNotes, deleteMessage }) {
-
-      const mine =
-        message.sender_id ===
-        session.user.id;
-
-      const deleted =
-        Boolean(
-          message.deleted_at
-        );
-      const attachment = !deleted ? getMessageAttachment(message.content) : null;
-      const [attachmentUrl, setAttachmentUrl] = useState('');
-      const [attachmentLoading, setAttachmentLoading] = useState(Boolean(attachment));
-
-      useEffect(() => {
-        let active = true;
-        if (!attachment?.path) {
-          setAttachmentLoading(false);
-          return undefined;
-        }
-        supabase.storage.from('anchor-chat-media').createSignedUrl(attachment.path, 3600)
-          .then(({ data, error }) => {
-            if (!active) return;
-            if (error) {
-              console.error('Attachment URL error:', error);
-              setAttachmentUrl('');
-              setAttachmentLoading(false);
-              return;
-            }
-            setAttachmentUrl(data?.signedUrl || '');
-            setAttachmentLoading(false);
-          })
-          .catch((urlError) => {
-            if (!active) return;
-            console.error('Attachment URL request failed:', urlError);
-            setAttachmentUrl('');
-            setAttachmentLoading(false);
-          });
-        return () => { active = false; };
-      }, [attachment?.path]);
-
-      const formatFileSize = (bytes) => bytes < 1024 * 1024
-        ? `${Math.max(1, Math.round(bytes / 1024))} KB`
-        : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-
-      return (
-        <div
-          className={
-            mine
-              ? 'message-row mine'
-              : 'message-row'
-          }
-        >
-
-          <div
-            className={
-              mine
-                ? 'message-bubble message-mine'
-                : 'message-bubble message-other'
-            }
-          >
-
-            {deleted ? (
-              <div className="deleted-message">
-
-                <em>
-                  {t.deletedMessage}
-                </em>
-
-              </div>
-            ) : attachment ? (
-              <div className="message-content" style={{ minWidth: 160, maxWidth: 280 }}>
-                {attachmentLoading ? (
-                  <span>{language === 'tr' ? 'Dosya yükleniyor…' : language === 'de' ? 'Datei wird geladen…' : 'Loading attachment…'}</span>
-                ) : attachmentUrl ? (
-                  attachment.mimeType?.startsWith('image/') ? (
-                    <a href={attachmentUrl} target="_blank" rel="noreferrer" title={attachment.name} style={{ display: 'block' }}>
-                      <img src={attachmentUrl} alt={attachment.name || 'Shared image'} loading="lazy" style={{ display: 'block', maxWidth: '100%', maxHeight: 240, borderRadius: 9, objectFit: 'contain' }} />
-                    </a>
-                  ) : (
-                    <a href={attachmentUrl} target="_blank" rel="noreferrer" download={attachment.name} style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'inherit', textDecoration: 'none', overflowWrap: 'anywhere' }}>
-                      <FileText size={27} />
-                      <span style={{ minWidth: 0, flex: 1 }}><strong style={{ display: 'block', fontSize: 12 }}>{attachment.name}</strong><small style={{ opacity: .7 }}>{formatFileSize(attachment.size || 0)}</small></span>
-                      <Download size={16} />
-                    </a>
-                  )
-                ) : (
-                  <span>{language === 'tr' ? 'Dosya açılamadı. Supabase Storage izinlerini ve dosyanın varlığını kontrol edin.' : language === 'de' ? 'Datei kann nicht geöffnet werden. Storage-Berechtigungen und Datei prüfen.' : 'Could not open attachment. Check Storage permissions and whether the file exists.'}</span>
-                )}
-              </div>
-            ) : (
-              <div className="message-content">
-                {message.content}
-              </div>
-            )}
-
-
-            <div className="message-meta">
-
-              <span>
-                {formatTime(
-                  message.created_at
-                )}
-              </span>
-
-
-              {mine &&
-                !deleted && (
-                  <span
-                    className={
-                      message.read_at
-                        ? 'read-status read'
-                        : 'read-status'
-                    }
-                  >
-                    {message.read_at
-                      ? '✓✓'
-                      : '✓'}
-                  </span>
-                )}
-
-            </div>
-
-
-            {!deleted && (
-              <button
-                type="button"
-                className="message-delete-button"
-                title={t.saveNote}
-                aria-label={t.saveNote}
-                onClick={() => saveMessageToNotes(message)}
-                style={{ right: mine ? 31 : 4, color: 'var(--accent, #8ba5ff)' }}
-              >
-                <Bookmark size={13} />
-              </button>
-            )}
-
-            {mine &&
-              !deleted && (
-                <button
-                  type="button"
-                  className="message-delete-button"
-                  title={
-                    t.deleteMessage
-                  }
-                  onClick={() =>
-                    deleteMessage(
-                      message.id
-                    )
-                  }
-                >
-                  <Trash2
-                    size={13}
-                  />
-                </button>
-              )}
-
-          </div>
-
-        </div>
-      );
-    }
-
-
-/* =========================================================
    APP
 ========================================================= */
 
@@ -1182,9 +986,6 @@ function App({
 
   const [messageText, setMessageText] =
     useState('');
-
-  const [uploadingAttachment, setUploadingAttachment] = useState(false);
-  const attachmentInputRef = useRef(null);
 
   const [searchText, setSearchText] =
     useState('');
@@ -2411,12 +2212,31 @@ function App({
     if (!friend?.id || !session?.user?.id) return;
     if (!window.confirm(language === 'tr' ? `@${friend.username} arkadaşlıktan çıkarılsın mı?` : `Remove @${friend.username} from your friends?`)) return;
     const uid = session.user.id;
-    const { error } = await supabase.from('friendships').delete().or(`and(user_id.eq.${uid},friend_id.eq.${friend.id}),and(user_id.eq.${friend.id},friend_id.eq.${uid})`);
-    if (error) { showToast(error.message || t.generic); return; }
+
+    // Remove both directional friendship rows first.
+    const { error: friendshipError } = await supabase
+      .from('friendships')
+      .delete()
+      .or(`and(user_id.eq.${uid},friend_id.eq.${friend.id}),and(user_id.eq.${friend.id},friend_id.eq.${uid})`);
+    if (friendshipError) { showToast(friendshipError.message || t.generic); return; }
+
+    // An old accepted request otherwise makes sendFriendRequest think they are still friends.
+    const { error: requestError } = await supabase
+      .from('friend_requests')
+      .delete()
+      .eq('status', 'accepted')
+      .or(`and(sender_id.eq.${uid},receiver_id.eq.${friend.id}),and(sender_id.eq.${friend.id},receiver_id.eq.${uid})`);
+    if (requestError) {
+      console.error('Old friend request cleanup error:', requestError);
+      showToast(language === 'tr'
+        ? 'Arkadaşlık kaldırıldı ancak eski isteğin temizlenemedi. Supabase izin SQL kodunu da çalıştır.'
+        : 'Friendship removed, but the old request could not be cleared. Run the Supabase permission SQL too.');
+    }
+
     setFriends(current => current.filter(item => item.id !== friend.id));
     if (selectedFriend?.id === friend.id) { setSelectedFriend(null); setMessages([]); }
     await loadFriends(uid);
-    showToast(language === 'tr' ? 'Arkadaş kaldırıldı.' : 'Friend removed.');
+    if (!requestError) showToast(language === 'tr' ? 'Arkadaş kaldırıldı. İstersen yeniden arkadaşlık isteği gönderebilirsin.' : 'Friend removed. You can send another request now.');
   };
 
   const clearChatForMe = async (friend) => {
@@ -2681,74 +2501,6 @@ function App({
 
       setMessageText('');
     };
-
-  const sendAttachment = async (file) => {
-    if (!file || !session?.user?.id || !selectedFriend?.id || uploadingAttachment) return;
-    if (isBlocked(selectedFriend.id)) {
-      showToast(t.cannotMessageBlocked);
-      return;
-    }
-    const maxBytes = 10 * 1024 * 1024;
-    if (file.size > maxBytes) {
-      showToast(language === 'tr' ? 'Dosya en fazla 10 MB olabilir.' : language === 'de' ? 'Datei darf höchstens 10 MB groß sein.' : 'File must be 10 MB or smaller.');
-      return;
-    }
-    const allowedMime = /^(image\/(jpeg|png|gif|webp|avif)|application\/pdf|text\/plain|application\/msword|application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document|application\/vnd\.ms-excel|application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|application\/zip|application\/x-zip-compressed)$/i;
-    const extension = file.name.split('.').pop()?.toLowerCase();
-    const allowedExtensions = ['jpg','jpeg','png','gif','webp','avif','pdf','txt','doc','docx','xls','xlsx','zip'];
-    if (!(allowedMime.test(file.type) || (!file.type && allowedExtensions.includes(extension)))) {
-      showToast(language === 'tr' ? 'Bu dosya türüne izin verilmiyor.' : language === 'de' ? 'Dieser Dateityp ist nicht erlaubt.' : 'This file type is not allowed.');
-      return;
-    }
-
-    setUploadingAttachment(true);
-    try {
-      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-100) || 'file';
-      const path = `${session.user.id}/${selectedFriend.id}/${crypto.randomUUID()}-${safeName}`;
-      const { error: uploadError } = await supabase.storage
-        .from('anchor-chat-media')
-        .upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false });
-      if (uploadError) throw uploadError;
-
-      const attachment = {
-        anchorAttachment: true,
-        path,
-        name: file.name,
-        mimeType: file.type || 'application/octet-stream',
-        size: file.size
-      };
-      const { data, error } = await supabase.from('messages').insert({
-        sender_id: session.user.id,
-        receiver_id: selectedFriend.id,
-        content: JSON.stringify(attachment),
-        message_type: 'message'
-      }).select().maybeSingle();
-      if (error) {
-        await supabase.storage.from('anchor-chat-media').remove([path]);
-        throw error;
-      }
-      if (!data) throw new Error(t.generic);
-
-      setMessages(current => current.some(item => item.id === data.id) ? current : [...current, data]);
-      const receiverChannel = supabase.channel(`anchor-user-${selectedFriend.id}`);
-      receiverChannel.subscribe(async status => {
-        if (status !== 'SUBSCRIBED') return;
-        try {
-          await receiverChannel.send({ type: 'broadcast', event: 'message', payload: data });
-        } catch (broadcastError) {
-          console.error('ANCHOR ATTACHMENT BROADCAST ERROR:', broadcastError);
-        }
-        window.setTimeout(() => supabase.removeChannel(receiverChannel), 1000);
-      });
-      showToast(language === 'tr' ? 'Dosya gönderildi.' : language === 'de' ? 'Datei gesendet.' : 'File sent.');
-    } catch (error) {
-      console.error('Attachment send error:', error);
-      showToast(error?.message || (language === 'tr' ? 'Dosya gönderilemedi. Supabase Storage ayarlarını kontrol et.' : language === 'de' ? 'Datei konnte nicht gesendet werden. Storage-Einstellungen prüfen.' : 'Could not send file. Check Supabase Storage setup.'));
-    } finally {
-      setUploadingAttachment(false);
-      if (attachmentInputRef.current) attachmentInputRef.current.value = '';
-    }
-  };
 
 
   /* =======================================================
@@ -3632,6 +3384,122 @@ function App({
 
 
   /* =======================================================
+     MESSAGE ITEM
+  ======================================================= */
+
+  const MessageItem =
+    ({ message }) => {
+
+      const mine =
+        message.sender_id ===
+        session.user.id;
+
+      const deleted =
+        Boolean(
+          message.deleted_at
+        );
+
+
+      return (
+        <div
+          className={
+            mine
+              ? 'message-row mine'
+              : 'message-row'
+          }
+        >
+
+          <div
+            className={
+              mine
+                ? 'message-bubble message-mine'
+                : 'message-bubble message-other'
+            }
+          >
+
+            {deleted ? (
+              <div className="deleted-message">
+
+                <em>
+                  {t.deletedMessage}
+                </em>
+
+              </div>
+            ) : (
+              <div className="message-content">
+                {message.content}
+              </div>
+            )}
+
+
+            <div className="message-meta">
+
+              <span>
+                {formatTime(
+                  message.created_at
+                )}
+              </span>
+
+
+              {mine &&
+                !deleted && (
+                  <span
+                    className={
+                      message.read_at
+                        ? 'read-status read'
+                        : 'read-status'
+                    }
+                  >
+                    {message.read_at
+                      ? '✓✓'
+                      : '✓'}
+                  </span>
+                )}
+
+            </div>
+
+
+            {!deleted && (
+              <button
+                type="button"
+                className="message-delete-button"
+                title={t.saveNote}
+                aria-label={t.saveNote}
+                onClick={() => saveMessageToNotes(message)}
+                style={{ right: mine ? 31 : 4, color: 'var(--accent, #8ba5ff)' }}
+              >
+                <Bookmark size={13} />
+              </button>
+            )}
+
+            {mine &&
+              !deleted && (
+                <button
+                  type="button"
+                  className="message-delete-button"
+                  title={
+                    t.deleteMessage
+                  }
+                  onClick={() =>
+                    deleteMessage(
+                      message.id
+                    )
+                  }
+                >
+                  <Trash2
+                    size={13}
+                  />
+                </button>
+              )}
+
+          </div>
+
+        </div>
+      );
+    };
+
+
+  /* =======================================================
      FRIEND LIST ITEM
   ======================================================= */
 
@@ -4251,16 +4119,13 @@ function App({
               </h2>
 
               <p>
-                {t.selectFriendPrompt}
+                Select a friend to start
+                a conversation.
               </p>
 
               <div className="welcome-brand">
                 <Logo />
               </div>
-
-              <p style={{ marginTop: 18, maxWidth: 420, lineHeight: 1.6, fontSize: 13, opacity: 0.82, textAlign: 'center' }}>
-                {t.supportContact}
-              </p>
 
             </div>
 
@@ -4406,29 +4271,6 @@ function App({
               </div>
 
 
-              {/* PRIVACY / ENCRYPTION STATUS */}
-              <div className="chat-security-banner" role="note">
-                <span className="chat-security-icon" aria-hidden="true">
-                  <Lock size={14} />
-                </span>
-                <span className="chat-security-copy">
-                  <strong>
-                    {language === 'tr'
-                      ? 'ANCHOR özel sohbet'
-                      : language === 'de'
-                        ? 'ANCHOR Privat-Chat'
-                        : 'ANCHOR private chat'}
-                  </strong>
-                  <span>
-                    {language === 'tr'
-                      ? 'Bu sohbet uçtan uca şifrelenmiştir.'
-                      : language === 'de'
-                        ? 'Dieser Chat ist Ende-zu-Ende verschlüsselt.'
-                        : 'This chat is end-to-end encrypted.'}
-                  </span>
-                </span>
-              </div>
-
               {/* BLOCK NOTICE */}
 
               {isBlocked(
@@ -4502,12 +4344,6 @@ function App({
                       <MessageItem
                         key={message.id}
                         message={message}
-                        session={session}
-                        t={t}
-                        language={language}
-                        formatTime={formatTime}
-                        saveMessageToNotes={saveMessageToNotes}
-                        deleteMessage={deleteMessage}
                       />
                     )
                   )
@@ -4543,24 +4379,6 @@ function App({
                 </button>
 
 
-                <button
-                  type="button"
-                  className="buzz-button"
-                  onClick={() => attachmentInputRef.current?.click()}
-                  disabled={isBlocked(selectedFriend.id) || uploadingAttachment}
-                  title={language === 'tr' ? 'Fotoğraf veya belge gönder' : language === 'de' ? 'Foto oder Dokument senden' : 'Send photo or document'}
-                  aria-label={language === 'tr' ? 'Fotoğraf veya belge gönder' : language === 'de' ? 'Foto oder Dokument senden' : 'Send photo or document'}
-                >
-                  {uploadingAttachment ? <div className="loading-spinner" /> : <ImagePlus size={18} />}
-                </button>
-                <input
-                  ref={attachmentInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/gif,image/webp,image/avif,application/pdf,text/plain,.doc,.docx,.xls,.xlsx,.zip"
-                  hidden
-                  onChange={(e) => sendAttachment(e.target.files?.[0])}
-                />
-
                 <input
                   value={messageText}
                   onChange={(e) =>
@@ -4586,7 +4404,6 @@ function App({
                   className="send-message-btn"
                   disabled={
                     !messageText.trim() ||
-                    uploadingAttachment ||
                     isBlocked(
                       selectedFriend.id
                     )
@@ -5040,18 +4857,6 @@ function Root() {
 
   }
 
-  // Admin route is only rendered for an authenticated session.
-  // AdminPanel independently checks the user's server-side admin role.
-  if (window.location.pathname === '/admin') {
-    return (
-      <AdminPanel
-        session={session}
-        onBack={() => {
-          window.location.href = '/';
-        }}
-      />
-    );
-  }
 
   return (
     <App
