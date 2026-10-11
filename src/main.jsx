@@ -32,11 +32,8 @@ import {
   Crown,
   UserCog,
   ImagePlus,
-  FileText,
-  Download,
   Pencil,
-  Bookmark,
-  Anchor
+  Bookmark
 } from 'lucide-react';
 
 import { supabase } from './lib/supabase';
@@ -119,7 +116,7 @@ function MarketTicker() {
         // DexScreener is a secondary fallback (it may not index CEX pairs).
         (async () => {
           try {
-            const data = await getJson('https://api-spot.weex.com/api/v3/market/ticker/24hr?symbol=JURISUSDT');
+            const data = await getJson('https://api-spot.weex.com/api/v3/ticker/24hr?symbol=JURISUSDT');
             const ticker = Array.isArray(data) ? data.find((item) => String(item.symbol || '').toUpperCase() === 'JURISUSDT') : data;
             const price = Number(ticker?.lastPrice);
             const change = Number(ticker?.priceChangePercent ?? ticker?.priceChange);
@@ -395,8 +392,6 @@ const translations = {
     add: 'Add friend',
     empty: 'No results',
     welcomeBack: 'Welcome back',
-    selectFriendPrompt: 'Select a friend to start a conversation.',
-    supportContact: 'For support, contact @support. To speak with the administrator, contact @stablekwon.' ,
     logout: 'Logout',
     aboutDefault: 'No information yet.',
     save: 'Save',
@@ -477,8 +472,6 @@ const translations = {
     add: 'Arkadaş ekle',
     empty: 'Sonuç yok',
     welcomeBack: 'Tekrar hoş geldin',
-    selectFriendPrompt: 'Sohbete başlamak için bir arkadaş seç.',
-    supportContact: 'Destek için @support, yöneticiyle görüşmek için @stablekwon hesabıyla iletişime geçebilirsiniz.' ,
     logout: 'Çıkış yap',
     aboutDefault: 'Henüz bilgi yok.',
     save: 'Kaydet',
@@ -559,8 +552,6 @@ const translations = {
     add: 'Freund hinzufügen',
     empty: 'Keine Ergebnisse',
     welcomeBack: 'Willkommen zurück',
-    selectFriendPrompt: 'Wähle einen Freund aus, um ein Gespräch zu beginnen.',
-    supportContact: 'Für Support kontaktiere @support. Um mit der Administration zu sprechen, kontaktiere @stablekwon.' ,
     logout: 'Abmelden',
     aboutDefault: 'Noch keine Informationen.',
     save: 'Speichern',
@@ -619,268 +610,309 @@ const translations = {
    AUTH
 ========================================================= */
 
-function Auth({ language, setLanguage, onAuth }) {
-  const t = translations[language] || translations.en;
-  const [mode, setMode] = useState('login');
-  const [username, setUsername] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+function Auth({
+  language,
+  setLanguage,
+  onAuth
+}) {
+  const t = translations[language];
+
+  const [mode, setMode] =
+    useState('login');
+
+  const [username, setUsername] =
+    useState('');
+
+  const [email, setEmail] =
+    useState('');
+
+  const [password, setPassword] =
+    useState('');
+
+  const [loading, setLoading] =
+    useState(false);
+
+  const [error, setError] =
+    useState('');
+
+  const [success, setSuccess] =
+    useState('');
+
 
   const submit = async (event) => {
     event.preventDefault();
+
     setError('');
     setSuccess('');
-    if (mode === 'signup' && !username.trim()) { setError(t.invalidUser); return; }
-    if (!email.trim()) { setError(t.invalidEmail); return; }
-    if (password.length < 6) { setError(t.shortPass); return; }
+
+    if (mode === 'signup') {
+      if (!username.trim()) {
+        setError(t.invalidUser);
+        return;
+      }
+    }
+
+    if (!email.trim()) {
+      setError(t.invalidEmail);
+      return;
+    }
+
+    if (password.length < 6) {
+      setError(t.shortPass);
+      return;
+    }
+
     setLoading(true);
+
     try {
       if (mode === 'login') {
-        const { data, error: loginError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
-        if (loginError) throw loginError;
-        if (data?.user) onAuth(data.user);
-      } else {
-        const { data, error: signupError } = await supabase.auth.signUp({
-          email: email.trim(), password, options: { data: { username: username.trim() } }
+        const {
+          data,
+          error: loginError
+        } = await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password
         });
-        if (signupError) throw signupError;
+
+        if (loginError) {
+          throw loginError;
+        }
+
         if (data?.user) {
-          const { error: profileError } = await supabase.from('profiles').upsert({ id: data.user.id, username: username.trim(), about: '' });
-          if (profileError) throw profileError;
-          if (data.session) onAuth(data.user);
-          else { setSuccess(`${t.created} Check your email if confirmation is enabled.`); setMode('login'); }
+          onAuth(data.user);
+        }
+      } else {
+        const {
+          data,
+          error: signupError
+        } = await supabase.auth.signUp({
+          email: email.trim(),
+          password,
+          options: {
+            data: {
+              username: username.trim()
+            }
+          }
+        });
+
+        if (signupError) {
+          throw signupError;
+        }
+
+        if (data?.user) {
+          await supabase
+            .from('profiles')
+            .upsert({
+              id: data.user.id,
+              username: username.trim(),
+              about: ''
+            });
+
+          if (data.session) {
+            onAuth(data.user);
+          } else {
+            setSuccess(
+              `${t.created} Check your email if confirmation is enabled.`
+            );
+
+            setMode('login');
+          }
         }
       }
     } catch (err) {
       console.error(err);
-      setError(err?.message || t.generic);
-    } finally { setLoading(false); }
+
+      setError(
+        err?.message ||
+        t.generic
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const copy = language === 'tr'
-    ? { tagline: 'Geçmişin sohbetleri, bugünün arkadaşlıkları.', description: 'Eski dostlarınla yeniden buluş. Yeni sohbetlere başla. Anılarını yaşat.', signup: 'Kayıt Ol', login: 'Giriş Yap', support: 'Yardıma mı ihtiyacın var? @support', admin: 'Yönetici: @stablekwon' }
-    : language === 'de'
-      ? { tagline: 'Alte Gespräche. Neue Erinnerungen.', description: 'Finde alte Freunde wieder, beginne neue Gespräche und halte Erinnerungen lebendig.', signup: 'Registrieren', login: 'Anmelden', support: 'Brauchst du Hilfe? @support', admin: 'Administration: @stablekwon' }
-      : { tagline: 'Reconnect. Relive. Chat.', description: 'A new home for old-school conversations, friendships and memories.', signup: 'Create Account', login: 'Log In', support: 'Need help? Contact @support', admin: 'Administrator: @stablekwon' };
 
   return (
-    <main className="anchor-welcome-page">
-      <div className="anchor-welcome-glow anchor-welcome-glow-one" />
-      <div className="anchor-welcome-glow anchor-welcome-glow-two" />
-      <header className="anchor-welcome-topbar">
-        <div className="anchor-welcome-mini-brand"><img src="/anchor-logo.png" alt="Anchor" /><span>ANCHOR</span></div>
-        <label className="anchor-language-select-label" aria-label={t.language}>
-          <Globe2 size={16} />
-          <select value={language} onChange={(e) => setLanguage(e.target.value)} aria-label={t.language}>
-            <option value="en">English</option><option value="tr">Türkçe</option><option value="de">Deutsch</option>
-          </select>
-        </label>
-      </header>
-      <section className="anchor-welcome-hero">
-        <div className="anchor-welcome-logo-wrap"><div className="anchor-welcome-logo-halo" /><img className="anchor-welcome-logo" src="/anchor-logo.png" alt="Anchor anchor logo" /></div>
-        <div className="anchor-welcome-eyebrow">A PLACE TO RECONNECT</div>
-        <h1>Anchor<span>.</span></h1>
-        <p className="anchor-welcome-tagline">{copy.tagline}</p>
-        <p className="anchor-welcome-description">{copy.description}</p>
-        <div className="anchor-welcome-actions">
-          <button className="anchor-welcome-primary" type="button" onClick={() => { setMode('signup'); setError(''); setSuccess(''); document.getElementById('anchor-auth-form')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }}>{copy.signup}<UserPlus size={17} /></button>
-          <button className="anchor-welcome-secondary" type="button" onClick={() => { setMode('login'); setError(''); setSuccess(''); document.getElementById('anchor-auth-form')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }}>{copy.login}<LogOut size={17} /></button>
+    <div className="auth-page">
+
+      <div className="auth-card">
+
+        <div className="auth-brand">
+          <Logo />
         </div>
-        <div className="anchor-welcome-auth-panel" id="anchor-auth-form">
-          <div className="anchor-welcome-auth-heading"><span>{mode === 'signup' ? t.switchSignup : t.login}</span><small>{mode === 'signup' ? t.welcome : t.welcomeBack}</small></div>
-          <form className="auth-form anchor-welcome-form" onSubmit={submit}>
-            {mode === 'signup' && <label><span>{t.username}</span><input value={username} onChange={(e) => setUsername(e.target.value)} placeholder={t.placeholder} autoComplete="username" /></label>}
-            <label><span>{t.email}</span><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder={t.emailPlaceholder} autoComplete="email" /></label>
-            <label><span>{t.password}</span><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={t.passwordPlaceholder} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} /></label>
-            {error && <div className="form-error">{error}</div>}{success && <div className="form-success">{success}</div>}
-            <button className="primary-button anchor-welcome-submit" type="submit" disabled={loading}>{loading ? t.checking : mode === 'login' ? t.login : t.switchSignup}</button>
-          </form>
-          <div className="auth-switch anchor-welcome-switch">{mode === 'login' ? <><span>{t.new}</span><button type="button" onClick={() => { setMode('signup'); setError(''); setSuccess(''); }}>{t.switchSignup}</button></> : <><span>{t.have}</span><button type="button" onClick={() => { setMode('login'); setError(''); setSuccess(''); }}>{t.switchLogin}</button></>}</div>
+
+        <div className="auth-title">
+          <h1>
+            {mode === 'login'
+              ? t.welcomeBack
+              : t.welcome}
+          </h1>
+
+          <p>
+            {t.choose}
+          </p>
         </div>
-        <div className="anchor-welcome-support">{copy.support}<span>•</span>{copy.admin}</div>
-      </section>
-      <footer className="anchor-welcome-footer">Anchor · 2026</footer>
-    </main>
-  );
-}
 
-/* =========================================================
-   MESSAGE ATTACHMENT HELPERS
-========================================================= */
-function getMessageAttachment(content) {
-  try {
-    const value = JSON.parse(content);
-    return value?.anchorAttachment === true ? value : null;
-  } catch {
-    return null;
-  }
-}
 
-function MessageItem({ message, session, t, language, formatTime, saveMessageToNotes, deleteMessage }) {
+        <div className="language-row">
 
-      const mine =
-        message.sender_id ===
-        session.user.id;
+          {['en', 'tr', 'de'].map(
+            (item) => (
+              <button
+                key={item}
+                type="button"
+                className={
+                  language === item
+                    ? 'language-button active'
+                    : 'language-button'
+                }
+                onClick={() =>
+                  setLanguage(item)
+                }
+              >
+                {item.toUpperCase()}
+              </button>
+            )
+          )}
 
-      const deleted =
-        Boolean(
-          message.deleted_at
-        );
-      const attachment = !deleted ? getMessageAttachment(message.content) : null;
-      const [attachmentUrl, setAttachmentUrl] = useState('');
-      const [attachmentLoading, setAttachmentLoading] = useState(Boolean(attachment));
+        </div>
 
-      useEffect(() => {
-        let active = true;
-        if (!attachment?.path) {
-          setAttachmentLoading(false);
-          return undefined;
-        }
-        supabase.storage.from('anchor-chat-media').createSignedUrl(attachment.path, 3600)
-          .then(({ data, error }) => {
-            if (!active) return;
-            if (error) {
-              console.error('Attachment URL error:', error);
-              setAttachmentUrl('');
-              setAttachmentLoading(false);
-              return;
-            }
-            setAttachmentUrl(data?.signedUrl || '');
-            setAttachmentLoading(false);
-          })
-          .catch((urlError) => {
-            if (!active) return;
-            console.error('Attachment URL request failed:', urlError);
-            setAttachmentUrl('');
-            setAttachmentLoading(false);
-          });
-        return () => { active = false; };
-      }, [attachment?.path]);
 
-      const formatFileSize = (bytes) => bytes < 1024 * 1024
-        ? `${Math.max(1, Math.round(bytes / 1024))} KB`
-        : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-
-      return (
-        <div
-          className={
-            mine
-              ? 'message-row mine'
-              : 'message-row'
-          }
+        <form
+          className="auth-form"
+          onSubmit={submit}
         >
 
-          <div
-            className={
-              mine
-                ? 'message-bubble message-mine'
-                : 'message-bubble message-other'
-            }
-          >
-
-            {deleted ? (
-              <div className="deleted-message">
-
-                <em>
-                  {t.deletedMessage}
-                </em>
-
-              </div>
-            ) : attachment ? (
-              <div className="message-content" style={{ minWidth: 160, maxWidth: 280 }}>
-                {attachmentLoading ? (
-                  <span>{language === 'tr' ? 'Dosya yükleniyor…' : language === 'de' ? 'Datei wird geladen…' : 'Loading attachment…'}</span>
-                ) : attachmentUrl ? (
-                  attachment.mimeType?.startsWith('image/') ? (
-                    <a href={attachmentUrl} target="_blank" rel="noreferrer" title={attachment.name} style={{ display: 'block' }}>
-                      <img src={attachmentUrl} alt={attachment.name || 'Shared image'} loading="lazy" style={{ display: 'block', maxWidth: '100%', maxHeight: 240, borderRadius: 9, objectFit: 'contain' }} />
-                    </a>
-                  ) : (
-                    <a href={attachmentUrl} target="_blank" rel="noreferrer" download={attachment.name} style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'inherit', textDecoration: 'none', overflowWrap: 'anywhere' }}>
-                      <FileText size={27} />
-                      <span style={{ minWidth: 0, flex: 1 }}><strong style={{ display: 'block', fontSize: 12 }}>{attachment.name}</strong><small style={{ opacity: .7 }}>{formatFileSize(attachment.size || 0)}</small></span>
-                      <Download size={16} />
-                    </a>
-                  )
-                ) : (
-                  <span>{language === 'tr' ? 'Dosya açılamadı. Supabase Storage izinlerini ve dosyanın varlığını kontrol edin.' : language === 'de' ? 'Datei kann nicht geöffnet werden. Storage-Berechtigungen und Datei prüfen.' : 'Could not open attachment. Check Storage permissions and whether the file exists.'}</span>
-                )}
-              </div>
-            ) : (
-              <div className="message-content">
-                {message.content}
-              </div>
-            )}
-
-
-            <div className="message-meta">
-
+          {mode === 'signup' && (
+            <label>
               <span>
-                {formatTime(
-                  message.created_at
-                )}
+                {t.username}
               </span>
 
+              <input
+                value={username}
+                onChange={(e) =>
+                  setUsername(e.target.value)
+                }
+                placeholder={t.placeholder}
+                autoComplete="username"
+              />
+            </label>
+          )}
 
-              {mine &&
-                !deleted && (
-                  <span
-                    className={
-                      message.read_at
-                        ? 'read-status read'
-                        : 'read-status'
-                    }
-                  >
-                    {message.read_at
-                      ? '✓✓'
-                      : '✓'}
-                  </span>
-                )}
 
+          <label>
+            <span>
+              {t.email}
+            </span>
+
+            <input
+              type="email"
+              value={email}
+              onChange={(e) =>
+                setEmail(e.target.value)
+              }
+              placeholder={t.emailPlaceholder}
+              autoComplete="email"
+            />
+          </label>
+
+
+          <label>
+            <span>
+              {t.password}
+            </span>
+
+            <input
+              type="password"
+              value={password}
+              onChange={(e) =>
+                setPassword(e.target.value)
+              }
+              placeholder={t.passwordPlaceholder}
+              autoComplete={
+                mode === 'login'
+                  ? 'current-password'
+                  : 'new-password'
+              }
+            />
+          </label>
+
+
+          {error && (
+            <div className="form-error">
+              {error}
             </div>
+          )}
 
 
-            {!deleted && (
+          {success && (
+            <div className="form-success">
+              {success}
+            </div>
+          )}
+
+
+          <button
+            className="primary-button"
+            type="submit"
+            disabled={loading}
+          >
+            {loading
+              ? t.checking
+              : mode === 'login'
+                ? t.login
+                : t.switchSignup}
+          </button>
+
+        </form>
+
+
+        <div className="auth-switch">
+
+          {mode === 'login' ? (
+            <>
+              <span>
+                {t.new}
+              </span>
+
               <button
                 type="button"
-                className="message-delete-button"
-                title={t.saveNote}
-                aria-label={t.saveNote}
-                onClick={() => saveMessageToNotes(message)}
-                style={{ right: mine ? 31 : 4, color: 'var(--accent, #8ba5ff)' }}
+                onClick={() => {
+                  setMode('signup');
+                  setError('');
+                  setSuccess('');
+                }}
               >
-                <Bookmark size={13} />
+                {t.switchSignup}
               </button>
-            )}
+            </>
+          ) : (
+            <>
+              <span>
+                {t.have}
+              </span>
 
-            {mine &&
-              !deleted && (
-                <button
-                  type="button"
-                  className="message-delete-button"
-                  title={
-                    t.deleteMessage
-                  }
-                  onClick={() =>
-                    deleteMessage(
-                      message.id
-                    )
-                  }
-                >
-                  <Trash2
-                    size={13}
-                  />
-                </button>
-              )}
-
-          </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setMode('login');
+                  setError('');
+                  setSuccess('');
+                }}
+              >
+                {t.switchLogin}
+              </button>
+            </>
+          )}
 
         </div>
-      );
-    }
+
+      </div>
+
+    </div>
+  );
+}
 
 
 /* =========================================================
@@ -955,9 +987,6 @@ function App({
 
   const [messageText, setMessageText] =
     useState('');
-
-  const [uploadingAttachment, setUploadingAttachment] = useState(false);
-  const attachmentInputRef = useRef(null);
 
   const [searchText, setSearchText] =
     useState('');
@@ -2474,74 +2503,6 @@ function App({
       setMessageText('');
     };
 
-  const sendAttachment = async (file) => {
-    if (!file || !session?.user?.id || !selectedFriend?.id || uploadingAttachment) return;
-    if (isBlocked(selectedFriend.id)) {
-      showToast(t.cannotMessageBlocked);
-      return;
-    }
-    const maxBytes = 10 * 1024 * 1024;
-    if (file.size > maxBytes) {
-      showToast(language === 'tr' ? 'Dosya en fazla 10 MB olabilir.' : language === 'de' ? 'Datei darf höchstens 10 MB groß sein.' : 'File must be 10 MB or smaller.');
-      return;
-    }
-    const allowedMime = /^(image\/(jpeg|png|gif|webp|avif)|application\/pdf|text\/plain|application\/msword|application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document|application\/vnd\.ms-excel|application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|application\/zip|application\/x-zip-compressed)$/i;
-    const extension = file.name.split('.').pop()?.toLowerCase();
-    const allowedExtensions = ['jpg','jpeg','png','gif','webp','avif','pdf','txt','doc','docx','xls','xlsx','zip'];
-    if (!(allowedMime.test(file.type) || (!file.type && allowedExtensions.includes(extension)))) {
-      showToast(language === 'tr' ? 'Bu dosya türüne izin verilmiyor.' : language === 'de' ? 'Dieser Dateityp ist nicht erlaubt.' : 'This file type is not allowed.');
-      return;
-    }
-
-    setUploadingAttachment(true);
-    try {
-      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-100) || 'file';
-      const path = `${session.user.id}/${selectedFriend.id}/${crypto.randomUUID()}-${safeName}`;
-      const { error: uploadError } = await supabase.storage
-        .from('anchor-chat-media')
-        .upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false });
-      if (uploadError) throw uploadError;
-
-      const attachment = {
-        anchorAttachment: true,
-        path,
-        name: file.name,
-        mimeType: file.type || 'application/octet-stream',
-        size: file.size
-      };
-      const { data, error } = await supabase.from('messages').insert({
-        sender_id: session.user.id,
-        receiver_id: selectedFriend.id,
-        content: JSON.stringify(attachment),
-        message_type: 'message'
-      }).select().maybeSingle();
-      if (error) {
-        await supabase.storage.from('anchor-chat-media').remove([path]);
-        throw error;
-      }
-      if (!data) throw new Error(t.generic);
-
-      setMessages(current => current.some(item => item.id === data.id) ? current : [...current, data]);
-      const receiverChannel = supabase.channel(`anchor-user-${selectedFriend.id}`);
-      receiverChannel.subscribe(async status => {
-        if (status !== 'SUBSCRIBED') return;
-        try {
-          await receiverChannel.send({ type: 'broadcast', event: 'message', payload: data });
-        } catch (broadcastError) {
-          console.error('ANCHOR ATTACHMENT BROADCAST ERROR:', broadcastError);
-        }
-        window.setTimeout(() => supabase.removeChannel(receiverChannel), 1000);
-      });
-      showToast(language === 'tr' ? 'Dosya gönderildi.' : language === 'de' ? 'Datei gesendet.' : 'File sent.');
-    } catch (error) {
-      console.error('Attachment send error:', error);
-      showToast(error?.message || (language === 'tr' ? 'Dosya gönderilemedi. Supabase Storage ayarlarını kontrol et.' : language === 'de' ? 'Datei konnte nicht gesendet werden. Storage-Einstellungen prüfen.' : 'Could not send file. Check Supabase Storage setup.'));
-    } finally {
-      setUploadingAttachment(false);
-      if (attachmentInputRef.current) attachmentInputRef.current.value = '';
-    }
-  };
-
 
   /* =======================================================
      SEND BUZZ
@@ -3040,93 +3001,73 @@ function App({
      SEND FRIEND REQUEST
   ======================================================= */
 
-  const sendFriendRequest =
-    async (receiverId) => {
+  const sendFriendRequest = async (receiverId) => {
+    const uid = session?.user?.id;
+    if (!uid || !receiverId || uid === receiverId) return;
 
-      if (!session?.user?.id) {
-        return;
-      }
+    // friendships is the source of truth; accepted history alone must not block re-adding.
+    const { data: friendshipRows, error: friendshipCheckError } = await supabase
+      .from('friendships')
+      .select('user_id,friend_id')
+      .or(`and(user_id.eq.${uid},friend_id.eq.${receiverId}),and(user_id.eq.${receiverId},friend_id.eq.${uid})`);
 
+    if (friendshipCheckError) {
+      console.error('Friendship check error:', friendshipCheckError);
+      showToast(friendshipCheckError.message || t.generic);
+      return;
+    }
+    if (friendshipRows?.length) {
+      showToast(t.myFriends);
+      return;
+    }
 
-      const {
-        data: existing
-      } = await supabase
+    const { data: existing, error: requestCheckError } = await supabase
+      .from('friend_requests')
+      .select('id,sender_id,receiver_id,status')
+      .or(`and(sender_id.eq.${uid},receiver_id.eq.${receiverId}),and(sender_id.eq.${receiverId},receiver_id.eq.${uid})`);
+
+    if (requestCheckError) {
+      console.error('Friend request check error:', requestCheckError);
+      showToast(requestCheckError.message || t.generic);
+      return;
+    }
+    if (existing?.some(request => request.status === 'pending')) {
+      showToast(t.pending);
+      return;
+    }
+
+    // Clear stale accepted/rejected history before creating a fresh request.
+    const staleIds = (existing || [])
+      .filter(request => request.status === 'accepted' || request.status === 'rejected')
+      .map(request => request.id);
+
+    if (staleIds.length) {
+      const { error: cleanupError } = await supabase
         .from('friend_requests')
-        .select(
-          'id,status'
-        )
-        .or(
-          `and(sender_id.eq.${session.user.id},receiver_id.eq.${receiverId}),and(sender_id.eq.${receiverId},receiver_id.eq.${session.user.id})`
-        );
-
-
-      if (
-        existing?.some(
-          (request) =>
-            request.status ===
-            'accepted'
-        )
-      ) {
-
-        showToast(
-          t.myFriends
-        );
-
+        .delete()
+        .in('id', staleIds);
+      if (cleanupError) {
+        console.error('Stale friend request cleanup error:', cleanupError);
+        showToast(language === 'tr'
+          ? 'Eski istek kaydı temizlenemedi. Supabase SQL izin kodunu çalıştırmalısın.'
+          : 'Could not clear the old request. Run the Supabase SQL permission fix.');
         return;
       }
+    }
 
+    const { error } = await supabase
+      .from('friend_requests')
+      .insert({ sender_id: uid, receiver_id: receiverId, status: 'pending' });
 
-      if (
-        existing?.some(
-          (request) =>
-            request.status ===
-            'pending'
-        )
-      ) {
+    if (error) {
+      console.error('Friend request error:', error);
+      showToast(error.message || t.generic);
+      return;
+    }
 
-        showToast(
-          t.pending
-        );
-
-        return;
-      }
-
-
-      const {
-        error
-      } = await supabase
-        .from('friend_requests')
-        .insert({
-          sender_id:
-            session.user.id,
-          receiver_id:
-            receiverId,
-          status:
-            'pending'
-        });
-
-
-      if (error) {
-
-        console.error(
-          'Friend request error:',
-          error
-        );
-
-        showToast(
-          error.message ||
-          t.generic
-        );
-
-        return;
-      }
-
-
-      showToast(
-        t.requestSent
-      );
-    };
-
+    showToast(t.requestSent);
+    await loadFriendRequests(uid);
+  };
 
   /* =======================================================
      ACCEPT REQUEST
@@ -3421,6 +3362,122 @@ function App({
       </div>
     );
   };
+
+
+  /* =======================================================
+     MESSAGE ITEM
+  ======================================================= */
+
+  const MessageItem =
+    ({ message }) => {
+
+      const mine =
+        message.sender_id ===
+        session.user.id;
+
+      const deleted =
+        Boolean(
+          message.deleted_at
+        );
+
+
+      return (
+        <div
+          className={
+            mine
+              ? 'message-row mine'
+              : 'message-row'
+          }
+        >
+
+          <div
+            className={
+              mine
+                ? 'message-bubble message-mine'
+                : 'message-bubble message-other'
+            }
+          >
+
+            {deleted ? (
+              <div className="deleted-message">
+
+                <em>
+                  {t.deletedMessage}
+                </em>
+
+              </div>
+            ) : (
+              <div className="message-content">
+                {message.content}
+              </div>
+            )}
+
+
+            <div className="message-meta">
+
+              <span>
+                {formatTime(
+                  message.created_at
+                )}
+              </span>
+
+
+              {mine &&
+                !deleted && (
+                  <span
+                    className={
+                      message.read_at
+                        ? 'read-status read'
+                        : 'read-status'
+                    }
+                  >
+                    {message.read_at
+                      ? '✓✓'
+                      : '✓'}
+                  </span>
+                )}
+
+            </div>
+
+
+            {!deleted && (
+              <button
+                type="button"
+                className="message-delete-button"
+                title={t.saveNote}
+                aria-label={t.saveNote}
+                onClick={() => saveMessageToNotes(message)}
+                style={{ right: mine ? 31 : 4, color: 'var(--accent, #8ba5ff)' }}
+              >
+                <Bookmark size={13} />
+              </button>
+            )}
+
+            {mine &&
+              !deleted && (
+                <button
+                  type="button"
+                  className="message-delete-button"
+                  title={
+                    t.deleteMessage
+                  }
+                  onClick={() =>
+                    deleteMessage(
+                      message.id
+                    )
+                  }
+                >
+                  <Trash2
+                    size={13}
+                  />
+                </button>
+              )}
+
+          </div>
+
+        </div>
+      );
+    };
 
 
   /* =======================================================
@@ -4043,16 +4100,13 @@ function App({
               </h2>
 
               <p>
-                {t.selectFriendPrompt}
+                Select a friend to start
+                a conversation.
               </p>
 
               <div className="welcome-brand">
                 <Logo />
               </div>
-
-              <p style={{ marginTop: 18, maxWidth: 420, lineHeight: 1.6, fontSize: 13, opacity: 0.82, textAlign: 'center' }}>
-                {t.supportContact}
-              </p>
 
             </div>
 
@@ -4198,29 +4252,6 @@ function App({
               </div>
 
 
-              {/* PRIVACY / ENCRYPTION STATUS */}
-              <div className="chat-security-banner" role="note">
-                <span className="chat-security-icon" aria-hidden="true">
-                  <Lock size={14} />
-                </span>
-                <span className="chat-security-copy">
-                  <strong>
-                    {language === 'tr'
-                      ? 'ANCHOR özel sohbet'
-                      : language === 'de'
-                        ? 'ANCHOR Privat-Chat'
-                        : 'ANCHOR private chat'}
-                  </strong>
-                  <span>
-                    {language === 'tr'
-                      ? 'Bu sohbet uçtan uca şifrelenmiştir.'
-                      : language === 'de'
-                        ? 'Dieser Chat ist Ende-zu-Ende verschlüsselt.'
-                        : 'This chat is end-to-end encrypted.'}
-                  </span>
-                </span>
-              </div>
-
               {/* BLOCK NOTICE */}
 
               {isBlocked(
@@ -4294,12 +4325,6 @@ function App({
                       <MessageItem
                         key={message.id}
                         message={message}
-                        session={session}
-                        t={t}
-                        language={language}
-                        formatTime={formatTime}
-                        saveMessageToNotes={saveMessageToNotes}
-                        deleteMessage={deleteMessage}
                       />
                     )
                   )
@@ -4335,24 +4360,6 @@ function App({
                 </button>
 
 
-                <button
-                  type="button"
-                  className="buzz-button"
-                  onClick={() => attachmentInputRef.current?.click()}
-                  disabled={isBlocked(selectedFriend.id) || uploadingAttachment}
-                  title={language === 'tr' ? 'Fotoğraf veya belge gönder' : language === 'de' ? 'Foto oder Dokument senden' : 'Send photo or document'}
-                  aria-label={language === 'tr' ? 'Fotoğraf veya belge gönder' : language === 'de' ? 'Foto oder Dokument senden' : 'Send photo or document'}
-                >
-                  {uploadingAttachment ? <div className="loading-spinner" /> : <ImagePlus size={18} />}
-                </button>
-                <input
-                  ref={attachmentInputRef}
-                  type="file"
-                  accept="image/jpeg,image/png,image/gif,image/webp,image/avif,application/pdf,text/plain,.doc,.docx,.xls,.xlsx,.zip"
-                  hidden
-                  onChange={(e) => sendAttachment(e.target.files?.[0])}
-                />
-
                 <input
                   value={messageText}
                   onChange={(e) =>
@@ -4378,7 +4385,6 @@ function App({
                   className="send-message-btn"
                   disabled={
                     !messageText.trim() ||
-                    uploadingAttachment ||
                     isBlocked(
                       selectedFriend.id
                     )
@@ -4832,8 +4838,7 @@ function Root() {
 
   }
 
-  // Admin route is only rendered for an authenticated session.
-  // AdminPanel independently checks the user's server-side admin role.
+  // Preserve the admin route when an authenticated administrator opens /admin.
   if (window.location.pathname.replace(/\/+$/, '') === '/admin') {
     return (
       <AdminPanel
