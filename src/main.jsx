@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 
 import { supabase } from './lib/supabase';
+import AdminPanel from './AdminPanel';
 import './styles.css';
 
 
@@ -3000,80 +3001,92 @@ function App({
      SEND FRIEND REQUEST
   ======================================================= */
 
-  const sendFriendRequest = async (receiverId) => {
-    const uid = session?.user?.id;
-    if (!uid || !receiverId || uid === receiverId) return;
+  const sendFriendRequest =
+    async (receiverId) => {
 
-    // The friendships table is the source of truth. An old "accepted"
-    // request can remain after a friend was removed, so it must not by itself
-    // prevent the two users from reconnecting.
-    const { data: friendshipRows, error: friendshipCheckError } = await supabase
-      .from('friendships')
-      .select('user_id,friend_id')
-      .or(`and(user_id.eq.${uid},friend_id.eq.${receiverId}),and(user_id.eq.${receiverId},friend_id.eq.${uid})`);
-
-    if (friendshipCheckError) {
-      console.error('Friendship check error:', friendshipCheckError);
-      showToast(friendshipCheckError.message || t.generic);
-      return;
-    }
-
-    if (friendshipRows?.length) {
-      showToast(t.myFriends);
-      return;
-    }
-
-    const { data: existing, error: requestCheckError } = await supabase
-      .from('friend_requests')
-      .select('id,sender_id,receiver_id,status')
-      .or(`and(sender_id.eq.${uid},receiver_id.eq.${receiverId}),and(sender_id.eq.${receiverId},receiver_id.eq.${uid})`);
-
-    if (requestCheckError) {
-      console.error('Friend request check error:', requestCheckError);
-      showToast(requestCheckError.message || t.generic);
-      return;
-    }
-
-    if (existing?.some(request => request.status === 'pending')) {
-      showToast(t.pending);
-      return;
-    }
-
-    // Remove stale accepted/rejected rows for this pair before inserting a new
-    // pending request. The SQL policy below permits participants to delete
-    // only their own pair's accepted/rejected history.
-    const staleIds = (existing || [])
-      .filter(request => request.status === 'accepted' || request.status === 'rejected')
-      .map(request => request.id);
-
-    if (staleIds.length) {
-      const { error: cleanupError } = await supabase
-        .from('friend_requests')
-        .delete()
-        .in('id', staleIds);
-
-      if (cleanupError) {
-        console.error('Stale friend request cleanup error:', cleanupError);
-        showToast(language === 'tr'
-          ? 'Eski arkadaşlık kaydı temizlenemedi. Lütfen Supabase izin SQL kodunu çalıştır.'
-          : 'Could not clear the old friend request. Please run the Supabase permission SQL.');
+      if (!session?.user?.id) {
         return;
       }
-    }
 
-    const { error } = await supabase
-      .from('friend_requests')
-      .insert({ sender_id: uid, receiver_id: receiverId, status: 'pending' });
 
-    if (error) {
-      console.error('Friend request error:', error);
-      showToast(error.message || t.generic);
-      return;
-    }
+      const {
+        data: existing
+      } = await supabase
+        .from('friend_requests')
+        .select(
+          'id,status'
+        )
+        .or(
+          `and(sender_id.eq.${session.user.id},receiver_id.eq.${receiverId}),and(sender_id.eq.${receiverId},receiver_id.eq.${session.user.id})`
+        );
 
-    showToast(t.requestSent);
-    await loadFriendRequests(uid);
-  };
+
+      if (
+        existing?.some(
+          (request) =>
+            request.status ===
+            'accepted'
+        )
+      ) {
+
+        showToast(
+          t.myFriends
+        );
+
+        return;
+      }
+
+
+      if (
+        existing?.some(
+          (request) =>
+            request.status ===
+            'pending'
+        )
+      ) {
+
+        showToast(
+          t.pending
+        );
+
+        return;
+      }
+
+
+      const {
+        error
+      } = await supabase
+        .from('friend_requests')
+        .insert({
+          sender_id:
+            session.user.id,
+          receiver_id:
+            receiverId,
+          status:
+            'pending'
+        });
+
+
+      if (error) {
+
+        console.error(
+          'Friend request error:',
+          error
+        );
+
+        showToast(
+          error.message ||
+          t.generic
+        );
+
+        return;
+      }
+
+
+      showToast(
+        t.requestSent
+      );
+    };
 
 
   /* =======================================================
@@ -4845,6 +4858,17 @@ function Root() {
 
   }
 
+  // Preserve the admin route when an authenticated administrator opens /admin.
+  if (window.location.pathname.replace(/\/+$/, '') === '/admin') {
+    return (
+      <AdminPanel
+        session={session}
+        onBack={() => {
+          window.location.href = '/';
+        }}
+      />
+    );
+  }
 
   return (
     <App
