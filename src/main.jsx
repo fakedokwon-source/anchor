@@ -32,6 +32,8 @@ import {
   Crown,
   UserCog,
   ImagePlus,
+  FileText,
+  Download,
   Pencil,
   Bookmark,
   Anchor
@@ -927,6 +929,18 @@ function Auth({
 
 
 /* =========================================================
+   MESSAGE ATTACHMENT HELPERS
+========================================================= */
+function getMessageAttachment(content) {
+  try {
+    const value = JSON.parse(content);
+    return value?.anchorAttachment === true ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/* =========================================================
    APP
 ========================================================= */
 
@@ -998,6 +1012,9 @@ function App({
 
   const [messageText, setMessageText] =
     useState('');
+
+  const [uploadingAttachment, setUploadingAttachment] = useState(false);
+  const attachmentInputRef = useRef(null);
 
   const [searchText, setSearchText] =
     useState('');
@@ -2495,6 +2512,74 @@ function App({
       setMessageText('');
     };
 
+  const sendAttachment = async (file) => {
+    if (!file || !session?.user?.id || !selectedFriend?.id || uploadingAttachment) return;
+    if (isBlocked(selectedFriend.id)) {
+      showToast(t.cannotMessageBlocked);
+      return;
+    }
+    const maxBytes = 10 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      showToast(language === 'tr' ? 'Dosya en fazla 10 MB olabilir.' : language === 'de' ? 'Datei darf höchstens 10 MB groß sein.' : 'File must be 10 MB or smaller.');
+      return;
+    }
+    const allowedMime = /^(image\/(jpeg|png|gif|webp|avif)|application\/pdf|text\/plain|application\/msword|application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document|application\/vnd\.ms-excel|application\/vnd\.openxmlformats-officedocument\.spreadsheetml\.sheet|application\/zip|application\/x-zip-compressed)$/i;
+    const extension = file.name.split('.').pop()?.toLowerCase();
+    const allowedExtensions = ['jpg','jpeg','png','gif','webp','avif','pdf','txt','doc','docx','xls','xlsx','zip'];
+    if (!(allowedMime.test(file.type) || (!file.type && allowedExtensions.includes(extension)))) {
+      showToast(language === 'tr' ? 'Bu dosya türüne izin verilmiyor.' : language === 'de' ? 'Dieser Dateityp ist nicht erlaubt.' : 'This file type is not allowed.');
+      return;
+    }
+
+    setUploadingAttachment(true);
+    try {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-100) || 'file';
+      const path = `${session.user.id}/${selectedFriend.id}/${crypto.randomUUID()}-${safeName}`;
+      const { error: uploadError } = await supabase.storage
+        .from('anchor-chat-media')
+        .upload(path, file, { contentType: file.type || 'application/octet-stream', upsert: false });
+      if (uploadError) throw uploadError;
+
+      const attachment = {
+        anchorAttachment: true,
+        path,
+        name: file.name,
+        mimeType: file.type || 'application/octet-stream',
+        size: file.size
+      };
+      const { data, error } = await supabase.from('messages').insert({
+        sender_id: session.user.id,
+        receiver_id: selectedFriend.id,
+        content: JSON.stringify(attachment),
+        message_type: 'message'
+      }).select().maybeSingle();
+      if (error) {
+        await supabase.storage.from('anchor-chat-media').remove([path]);
+        throw error;
+      }
+      if (!data) throw new Error(t.generic);
+
+      setMessages(current => current.some(item => item.id === data.id) ? current : [...current, data]);
+      const receiverChannel = supabase.channel(`anchor-user-${selectedFriend.id}`);
+      receiverChannel.subscribe(async status => {
+        if (status !== 'SUBSCRIBED') return;
+        try {
+          await receiverChannel.send({ type: 'broadcast', event: 'message', payload: data });
+        } catch (broadcastError) {
+          console.error('ANCHOR ATTACHMENT BROADCAST ERROR:', broadcastError);
+        }
+        window.setTimeout(() => supabase.removeChannel(receiverChannel), 1000);
+      });
+      showToast(language === 'tr' ? 'Dosya gönderildi.' : language === 'de' ? 'Datei gesendet.' : 'File sent.');
+    } catch (error) {
+      console.error('Attachment send error:', error);
+      showToast(error?.message || (language === 'tr' ? 'Dosya gönderilemedi. Supabase Storage ayarlarını kontrol et.' : language === 'de' ? 'Datei konnte nicht gesendet werden. Storage-Einstellungen prüfen.' : 'Could not send file. Check Supabase Storage setup.'));
+    } finally {
+      setUploadingAttachment(false);
+      if (attachmentInputRef.current) attachmentInputRef.current.value = '';
+    }
+  };
+
 
   /* =======================================================
      SEND BUZZ
@@ -3391,7 +3476,29 @@ function App({
         Boolean(
           message.deleted_at
         );
+      const attachment = !deleted ? getMessageAttachment(message.content) : null;
+      const [attachmentUrl, setAttachmentUrl] = useState('');
+      const [attachmentLoading, setAttachmentLoading] = useState(Boolean(attachment));
 
+      useEffect(() => {
+        let active = true;
+        if (!attachment?.path) {
+          setAttachmentLoading(false);
+          return undefined;
+        }
+        supabase.storage.from('anchor-chat-media').createSignedUrl(attachment.path, 3600)
+          .then(({ data, error }) => {
+            if (!active) return;
+            if (error) console.error('Attachment URL error:', error);
+            setAttachmentUrl(data?.signedUrl || '');
+            setAttachmentLoading(false);
+          });
+        return () => { active = false; };
+      }, [attachment?.path]);
+
+      const formatFileSize = (bytes) => bytes < 1024 * 1024
+        ? `${Math.max(1, Math.round(bytes / 1024))} KB`
+        : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 
       return (
         <div
@@ -3417,6 +3524,26 @@ function App({
                   {t.deletedMessage}
                 </em>
 
+              </div>
+            ) : attachment ? (
+              <div className="message-content" style={{ minWidth: 160, maxWidth: 280 }}>
+                {attachmentLoading ? (
+                  <span>{language === 'tr' ? 'Dosya yükleniyor…' : language === 'de' ? 'Datei wird geladen…' : 'Loading attachment…'}</span>
+                ) : attachmentUrl ? (
+                  attachment.mimeType?.startsWith('image/') ? (
+                    <a href={attachmentUrl} target="_blank" rel="noreferrer" title={attachment.name} style={{ display: 'block' }}>
+                      <img src={attachmentUrl} alt={attachment.name || 'Shared image'} loading="lazy" style={{ display: 'block', maxWidth: '100%', maxHeight: 240, borderRadius: 9, objectFit: 'contain' }} />
+                    </a>
+                  ) : (
+                    <a href={attachmentUrl} target="_blank" rel="noreferrer" download={attachment.name} style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'inherit', textDecoration: 'none', overflowWrap: 'anywhere' }}>
+                      <FileText size={27} />
+                      <span style={{ minWidth: 0, flex: 1 }}><strong style={{ display: 'block', fontSize: 12 }}>{attachment.name}</strong><small style={{ opacity: .7 }}>{formatFileSize(attachment.size || 0)}</small></span>
+                      <Download size={16} />
+                    </a>
+                  )
+                ) : (
+                  <span>{language === 'tr' ? 'Dosya açılamadı.' : language === 'de' ? 'Datei kann nicht geöffnet werden.' : 'Could not open attachment.'}</span>
+                )}
               </div>
             ) : (
               <div className="message-content">
@@ -4395,6 +4522,24 @@ function App({
                 </button>
 
 
+                <button
+                  type="button"
+                  className="buzz-button"
+                  onClick={() => attachmentInputRef.current?.click()}
+                  disabled={isBlocked(selectedFriend.id) || uploadingAttachment}
+                  title={language === 'tr' ? 'Fotoğraf veya belge gönder' : language === 'de' ? 'Foto oder Dokument senden' : 'Send photo or document'}
+                  aria-label={language === 'tr' ? 'Fotoğraf veya belge gönder' : language === 'de' ? 'Foto oder Dokument senden' : 'Send photo or document'}
+                >
+                  {uploadingAttachment ? <div className="loading-spinner" /> : <ImagePlus size={18} />}
+                </button>
+                <input
+                  ref={attachmentInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/gif,image/webp,image/avif,application/pdf,text/plain,.doc,.docx,.xls,.xlsx,.zip"
+                  hidden
+                  onChange={(e) => sendAttachment(e.target.files?.[0])}
+                />
+
                 <input
                   value={messageText}
                   onChange={(e) =>
@@ -4420,6 +4565,7 @@ function App({
                   className="send-message-btn"
                   disabled={
                     !messageText.trim() ||
+                    uploadingAttachment ||
                     isBlocked(
                       selectedFriend.id
                     )
