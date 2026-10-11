@@ -33,7 +33,8 @@ import {
   UserCog,
   ImagePlus,
   Pencil,
-  Bookmark
+  Bookmark,
+  Anchor
 } from 'lucide-react';
 
 import { supabase } from './lib/supabase';
@@ -737,8 +738,18 @@ function Auth({
 
       <div className="auth-card">
 
-        <div className="auth-brand">
-          <Logo />
+        <div
+          className="auth-brand"
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '8px'
+          }}
+        >
+          <Anchor size={38} strokeWidth={1.8} aria-hidden="true" />
+          <div className="brand-name">ANCHOR</div>
+          <p style={{ margin: 0 }}>Reconnect. Relive. Chat.</p>
         </div>
 
         <div className="auth-title">
