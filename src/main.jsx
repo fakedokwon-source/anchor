@@ -940,6 +940,170 @@ function getMessageAttachment(content) {
   }
 }
 
+function MessageItem({ message, session, t, language, formatTime, saveMessageToNotes, deleteMessage }) {
+
+      const mine =
+        message.sender_id ===
+        session.user.id;
+
+      const deleted =
+        Boolean(
+          message.deleted_at
+        );
+      const attachment = !deleted ? getMessageAttachment(message.content) : null;
+      const [attachmentUrl, setAttachmentUrl] = useState('');
+      const [attachmentLoading, setAttachmentLoading] = useState(Boolean(attachment));
+
+      useEffect(() => {
+        let active = true;
+        if (!attachment?.path) {
+          setAttachmentLoading(false);
+          return undefined;
+        }
+        supabase.storage.from('anchor-chat-media').createSignedUrl(attachment.path, 3600)
+          .then(({ data, error }) => {
+            if (!active) return;
+            if (error) {
+              console.error('Attachment URL error:', error);
+              setAttachmentUrl('');
+              setAttachmentLoading(false);
+              return;
+            }
+            setAttachmentUrl(data?.signedUrl || '');
+            setAttachmentLoading(false);
+          })
+          .catch((urlError) => {
+            if (!active) return;
+            console.error('Attachment URL request failed:', urlError);
+            setAttachmentUrl('');
+            setAttachmentLoading(false);
+          });
+        return () => { active = false; };
+      }, [attachment?.path]);
+
+      const formatFileSize = (bytes) => bytes < 1024 * 1024
+        ? `${Math.max(1, Math.round(bytes / 1024))} KB`
+        : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+
+      return (
+        <div
+          className={
+            mine
+              ? 'message-row mine'
+              : 'message-row'
+          }
+        >
+
+          <div
+            className={
+              mine
+                ? 'message-bubble message-mine'
+                : 'message-bubble message-other'
+            }
+          >
+
+            {deleted ? (
+              <div className="deleted-message">
+
+                <em>
+                  {t.deletedMessage}
+                </em>
+
+              </div>
+            ) : attachment ? (
+              <div className="message-content" style={{ minWidth: 160, maxWidth: 280 }}>
+                {attachmentLoading ? (
+                  <span>{language === 'tr' ? 'Dosya yükleniyor…' : language === 'de' ? 'Datei wird geladen…' : 'Loading attachment…'}</span>
+                ) : attachmentUrl ? (
+                  attachment.mimeType?.startsWith('image/') ? (
+                    <a href={attachmentUrl} target="_blank" rel="noreferrer" title={attachment.name} style={{ display: 'block' }}>
+                      <img src={attachmentUrl} alt={attachment.name || 'Shared image'} loading="lazy" style={{ display: 'block', maxWidth: '100%', maxHeight: 240, borderRadius: 9, objectFit: 'contain' }} />
+                    </a>
+                  ) : (
+                    <a href={attachmentUrl} target="_blank" rel="noreferrer" download={attachment.name} style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'inherit', textDecoration: 'none', overflowWrap: 'anywhere' }}>
+                      <FileText size={27} />
+                      <span style={{ minWidth: 0, flex: 1 }}><strong style={{ display: 'block', fontSize: 12 }}>{attachment.name}</strong><small style={{ opacity: .7 }}>{formatFileSize(attachment.size || 0)}</small></span>
+                      <Download size={16} />
+                    </a>
+                  )
+                ) : (
+                  <span>{language === 'tr' ? 'Dosya açılamadı. Supabase Storage izinlerini ve dosyanın varlığını kontrol edin.' : language === 'de' ? 'Datei kann nicht geöffnet werden. Storage-Berechtigungen und Datei prüfen.' : 'Could not open attachment. Check Storage permissions and whether the file exists.'}</span>
+                )}
+              </div>
+            ) : (
+              <div className="message-content">
+                {message.content}
+              </div>
+            )}
+
+
+            <div className="message-meta">
+
+              <span>
+                {formatTime(
+                  message.created_at
+                )}
+              </span>
+
+
+              {mine &&
+                !deleted && (
+                  <span
+                    className={
+                      message.read_at
+                        ? 'read-status read'
+                        : 'read-status'
+                    }
+                  >
+                    {message.read_at
+                      ? '✓✓'
+                      : '✓'}
+                  </span>
+                )}
+
+            </div>
+
+
+            {!deleted && (
+              <button
+                type="button"
+                className="message-delete-button"
+                title={t.saveNote}
+                aria-label={t.saveNote}
+                onClick={() => saveMessageToNotes(message)}
+                style={{ right: mine ? 31 : 4, color: 'var(--accent, #8ba5ff)' }}
+              >
+                <Bookmark size={13} />
+              </button>
+            )}
+
+            {mine &&
+              !deleted && (
+                <button
+                  type="button"
+                  className="message-delete-button"
+                  title={
+                    t.deleteMessage
+                  }
+                  onClick={() =>
+                    deleteMessage(
+                      message.id
+                    )
+                  }
+                >
+                  <Trash2
+                    size={13}
+                  />
+                </button>
+              )}
+
+          </div>
+
+        </div>
+      );
+    }
+
+
 /* =========================================================
    APP
 ========================================================= */
@@ -3462,175 +3626,6 @@ function App({
 
 
   /* =======================================================
-     MESSAGE ITEM
-  ======================================================= */
-
-  const MessageItem =
-    ({ message }) => {
-
-      const mine =
-        message.sender_id ===
-        session.user.id;
-
-      const deleted =
-        Boolean(
-          message.deleted_at
-        );
-      const attachment = !deleted ? getMessageAttachment(message.content) : null;
-      const [attachmentUrl, setAttachmentUrl] = useState('');
-      const [attachmentLoading, setAttachmentLoading] = useState(Boolean(attachment));
-
-      useEffect(() => {
-        let active = true;
-        if (!attachment?.path) {
-          setAttachmentLoading(false);
-          return undefined;
-        }
-        supabase.storage.from('anchor-chat-media').createSignedUrl(attachment.path, 3600)
-          .then(({ data, error }) => {
-            if (!active) return;
-            if (error) {
-              console.error('Attachment URL error:', error);
-              setAttachmentUrl('');
-              setAttachmentLoading(false);
-              return;
-            }
-            setAttachmentUrl(data?.signedUrl || '');
-            setAttachmentLoading(false);
-          })
-          .catch((urlError) => {
-            if (!active) return;
-            console.error('Attachment URL request failed:', urlError);
-            setAttachmentUrl('');
-            setAttachmentLoading(false);
-          });
-        return () => { active = false; };
-      }, [attachment?.path]);
-
-      const formatFileSize = (bytes) => bytes < 1024 * 1024
-        ? `${Math.max(1, Math.round(bytes / 1024))} KB`
-        : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-
-      return (
-        <div
-          className={
-            mine
-              ? 'message-row mine'
-              : 'message-row'
-          }
-        >
-
-          <div
-            className={
-              mine
-                ? 'message-bubble message-mine'
-                : 'message-bubble message-other'
-            }
-          >
-
-            {deleted ? (
-              <div className="deleted-message">
-
-                <em>
-                  {t.deletedMessage}
-                </em>
-
-              </div>
-            ) : attachment ? (
-              <div className="message-content" style={{ minWidth: 160, maxWidth: 280 }}>
-                {attachmentLoading ? (
-                  <span>{language === 'tr' ? 'Dosya yükleniyor…' : language === 'de' ? 'Datei wird geladen…' : 'Loading attachment…'}</span>
-                ) : attachmentUrl ? (
-                  attachment.mimeType?.startsWith('image/') ? (
-                    <a href={attachmentUrl} target="_blank" rel="noreferrer" title={attachment.name} style={{ display: 'block' }}>
-                      <img src={attachmentUrl} alt={attachment.name || 'Shared image'} loading="lazy" style={{ display: 'block', maxWidth: '100%', maxHeight: 240, borderRadius: 9, objectFit: 'contain' }} />
-                    </a>
-                  ) : (
-                    <a href={attachmentUrl} target="_blank" rel="noreferrer" download={attachment.name} style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'inherit', textDecoration: 'none', overflowWrap: 'anywhere' }}>
-                      <FileText size={27} />
-                      <span style={{ minWidth: 0, flex: 1 }}><strong style={{ display: 'block', fontSize: 12 }}>{attachment.name}</strong><small style={{ opacity: .7 }}>{formatFileSize(attachment.size || 0)}</small></span>
-                      <Download size={16} />
-                    </a>
-                  )
-                ) : (
-                  <span>{language === 'tr' ? 'Dosya açılamadı. Supabase Storage izinlerini ve dosyanın varlığını kontrol edin.' : language === 'de' ? 'Datei kann nicht geöffnet werden. Storage-Berechtigungen und Datei prüfen.' : 'Could not open attachment. Check Storage permissions and whether the file exists.'}</span>
-                )}
-              </div>
-            ) : (
-              <div className="message-content">
-                {message.content}
-              </div>
-            )}
-
-
-            <div className="message-meta">
-
-              <span>
-                {formatTime(
-                  message.created_at
-                )}
-              </span>
-
-
-              {mine &&
-                !deleted && (
-                  <span
-                    className={
-                      message.read_at
-                        ? 'read-status read'
-                        : 'read-status'
-                    }
-                  >
-                    {message.read_at
-                      ? '✓✓'
-                      : '✓'}
-                  </span>
-                )}
-
-            </div>
-
-
-            {!deleted && (
-              <button
-                type="button"
-                className="message-delete-button"
-                title={t.saveNote}
-                aria-label={t.saveNote}
-                onClick={() => saveMessageToNotes(message)}
-                style={{ right: mine ? 31 : 4, color: 'var(--accent, #8ba5ff)' }}
-              >
-                <Bookmark size={13} />
-              </button>
-            )}
-
-            {mine &&
-              !deleted && (
-                <button
-                  type="button"
-                  className="message-delete-button"
-                  title={
-                    t.deleteMessage
-                  }
-                  onClick={() =>
-                    deleteMessage(
-                      message.id
-                    )
-                  }
-                >
-                  <Trash2
-                    size={13}
-                  />
-                </button>
-              )}
-
-          </div>
-
-        </div>
-      );
-    };
-
-
-  /* =======================================================
      FRIEND LIST ITEM
   ======================================================= */
 
@@ -4498,6 +4493,12 @@ function App({
                       <MessageItem
                         key={message.id}
                         message={message}
+                        session={session}
+                        t={t}
+                        language={language}
+                        formatTime={formatTime}
+                        saveMessageToNotes={saveMessageToNotes}
+                        deleteMessage={deleteMessage}
                       />
                     )
                   )
