@@ -32,7 +32,8 @@ import {
   Crown,
   UserCog,
   ImagePlus,
-  Pencil
+  Pencil,
+  Bookmark
 } from 'lucide-react';
 
 import { supabase } from './lib/supabase';
@@ -433,7 +434,13 @@ const translations = {
     close: 'Close',
     onlineNow: 'Online',
     offlineNow: 'Offline',
-    justNow: 'Just now'
+    justNow: 'Just now',
+    savedNotes: 'Saved Messages / Notes',
+    savedNotePlaceholder: 'Write a private note or save a message...',
+    saveNote: 'Save note',
+    noSavedNotes: 'Nothing saved yet.',
+    deleteNote: 'Delete note',
+    noteSaved: 'Saved successfully.'
   },
 
   tr: {
@@ -507,7 +514,13 @@ const translations = {
     close: 'Kapat',
     onlineNow: 'Çevrimiçi',
     offlineNow: 'Çevrimdışı',
-    justNow: 'Az önce'
+    justNow: 'Az önce',
+    savedNotes: 'Kayıtlı Mesajlar / Notlar',
+    savedNotePlaceholder: 'Özel bir not yaz veya mesajını kaydet...',
+    saveNote: 'Notu kaydet',
+    noSavedNotes: 'Henüz kayıtlı not yok.',
+    deleteNote: 'Notu sil',
+    noteSaved: 'Başarıyla kaydedildi.'
   },
 
   de: {
@@ -581,7 +594,13 @@ const translations = {
     close: 'Schließen',
     onlineNow: 'Online',
     offlineNow: 'Offline',
-    justNow: 'Gerade eben'
+    justNow: 'Gerade eben',
+    savedNotes: 'Gespeicherte Nachrichten / Notizen',
+    savedNotePlaceholder: 'Private Notiz schreiben oder Nachricht speichern...',
+    saveNote: 'Notiz speichern',
+    noSavedNotes: 'Noch nichts gespeichert.',
+    deleteNote: 'Notiz löschen',
+    noteSaved: 'Erfolgreich gespeichert.'
   }
 };
 
@@ -948,6 +967,9 @@ function App({
   const [savingGroupProfile, setSavingGroupProfile] = useState(false);
   const [loadingGroups, setLoadingGroups] = useState(false);
   const [groupSearchText, setGroupSearchText] = useState('');
+  const [savedNotes, setSavedNotes] = useState([]);
+  const [newSavedNote, setNewSavedNote] = useState('');
+  const [savingNote, setSavingNote] = useState(false);
 
   /*
     Realtime mesaj handler'i useEffect içinde çalıştığı için
@@ -1861,6 +1883,83 @@ function App({
   };
 
   useEffect(() => { loadGroups(); }, [session?.user?.id]);
+
+  // Saved notes are private to the authenticated user and persist in Supabase.
+  const loadSavedNotes = async () => {
+    if (!session?.user?.id) return;
+    const { data, error } = await supabase
+      .from('saved_notes')
+      .select('id, user_id, content, created_at, updated_at')
+      .eq('user_id', session.user.id)
+      .order('created_at', { ascending: false });
+    if (error) {
+      console.error('Saved notes load error:', error);
+      if (error.code !== '42P01' && error.code !== 'PGRST205') {
+        showToast(language === 'tr' ? 'Kayıtlı notlar yüklenemedi.' : 'Could not load saved notes.');
+      }
+      setSavedNotes([]);
+      return;
+    }
+    setSavedNotes(data || []);
+  };
+
+  useEffect(() => { loadSavedNotes(); }, [session?.user?.id]);
+
+  const saveNote = async (event) => {
+    event?.preventDefault();
+    const content = newSavedNote.trim();
+    if (!content || !session?.user?.id || savingNote) return;
+    setSavingNote(true);
+    const { data, error } = await supabase
+      .from('saved_notes')
+      .insert({ user_id: session.user.id, content })
+      .select('id, user_id, content, created_at, updated_at')
+      .single();
+    setSavingNote(false);
+    if (error) {
+      console.error('Saved note insert error:', error);
+      showToast(language === 'tr' ? 'Not kaydedilemedi. Supabase SQL kurulumunu kontrol et.' : 'Could not save note. Check the Supabase SQL setup.');
+      return;
+    }
+    setSavedNotes(current => [data, ...current]);
+    setNewSavedNote('');
+    showToast(t.noteSaved);
+  };
+
+  const saveMessageToNotes = async (message) => {
+    if (!message?.content?.trim() || !session?.user?.id) return;
+    const senderName = message.sender_id === session.user.id
+      ? t.you
+      : (selectedFriend?.username || (language === 'tr' ? 'Arkadaş' : 'Friend'));
+    const content = `${senderName}:\n${message.content.trim()}`;
+    const { data, error } = await supabase
+      .from('saved_notes')
+      .insert({ user_id: session.user.id, content })
+      .select('id, user_id, content, created_at, updated_at')
+      .single();
+    if (error) {
+      console.error('Save message error:', error);
+      showToast(language === 'tr' ? 'Mesaj kaydedilemedi.' : 'Could not save message.');
+      return;
+    }
+    setSavedNotes(current => [data, ...current]);
+    showToast(t.noteSaved);
+  };
+
+  const deleteSavedNote = async (noteId) => {
+    const { error } = await supabase
+      .from('saved_notes')
+      .delete()
+      .eq('id', noteId)
+      .eq('user_id', session.user.id);
+    if (error) {
+      console.error('Saved note delete error:', error);
+      showToast(language === 'tr' ? 'Not silinemedi.' : 'Could not delete note.');
+      return;
+    }
+    setSavedNotes(current => current.filter(note => note.id !== noteId));
+  };
+
 
   const createGroup = async (event) => {
     event?.preventDefault();
@@ -3341,6 +3440,19 @@ function App({
             </div>
 
 
+            {!deleted && (
+              <button
+                type="button"
+                className="message-delete-button"
+                title={t.saveNote}
+                aria-label={t.saveNote}
+                onClick={() => saveMessageToNotes(message)}
+                style={{ right: mine ? 31 : 4, color: 'var(--accent, #8ba5ff)' }}
+              >
+                <Bookmark size={13} />
+              </button>
+            )}
+
             {mine &&
               !deleted && (
                 <button
@@ -3854,6 +3966,40 @@ function App({
               <input value={groupSearchText} onChange={e => setGroupSearchText(e.target.value)} placeholder={language === 'tr' ? 'Grup adı veya @kullanıcı adı' : 'Group name or @username'} style={{ width: '100%', boxSizing: 'border-box', margin: '6px 0', padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border-color, rgba(148,163,184,.2))', background: 'var(--input-bg, transparent)', color: 'inherit' }}/>
               {groupSearchText.trim() && groups.filter(group => !group.is_private && !group.is_member && `${group.name} ${group.username}`.toLowerCase().includes(groupSearchText.trim().replace(/^@/, '').toLowerCase())).map(group => <div key={`discover-${group.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 4px' }}><span style={{ flex: 1, minWidth: 0, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis' }}>{group.name} <small style={{ opacity: .6 }}>@{group.username}</small></span><button type="button" onClick={() => joinGroup(group)} style={{ border: 0, borderRadius: 6, padding: '5px 7px', background: '#253b35', color: '#8be0b1', cursor: 'pointer', fontSize: 11 }}>{language === 'tr' ? 'Katıl' : 'Join'}</button></div>)}
               {groupSearchText.trim() && groups.filter(group => !group.is_private && !group.is_member && `${group.name} ${group.username}`.toLowerCase().includes(groupSearchText.trim().replace(/^@/, '').toLowerCase())).length === 0 && <div className="empty-small">{language === 'tr' ? 'Katılabileceğin grup bulunamadı.' : 'No public groups found.'}</div>}
+            </div>
+          </div>
+
+          {/* SAVED MESSAGES / NOTES */}
+          <div className="sidebar-section saved-notes-section" style={{ marginTop: 18, padding: '0 2px' }}>
+            <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Bookmark size={15} />
+              <span>{t.savedNotes}</span>
+              <span className="section-count" style={{ marginLeft: 'auto' }}>{savedNotes.length}</span>
+            </div>
+            <form onSubmit={saveNote} style={{ marginTop: 8 }}>
+              <textarea
+                value={newSavedNote}
+                onChange={event => setNewSavedNote(event.target.value)}
+                placeholder={t.savedNotePlaceholder}
+                maxLength={5000}
+                rows={3}
+                aria-label={t.savedNotePlaceholder}
+                style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border-color, rgba(148,163,184,.2))', background: 'var(--input-bg, transparent)', color: 'inherit', font: 'inherit', fontSize: 12 }}
+              />
+              <button type="submit" disabled={!newSavedNote.trim() || savingNote} style={{ width: '100%', marginTop: 5, border: 0, borderRadius: 7, padding: '8px 10px', background: 'var(--accent, #5b7cfa)', color: '#fff', cursor: newSavedNote.trim() && !savingNote ? 'pointer' : 'not-allowed', opacity: newSavedNote.trim() && !savingNote ? 1 : .55, fontWeight: 700, fontSize: 12 }}>
+                {savingNote ? t.checking : t.saveNote}
+              </button>
+            </form>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginTop: 9 }}>
+              {savedNotes.length === 0 ? <div className="empty-small">{t.noSavedNotes}</div> : savedNotes.map(note => (
+                <div key={note.id} style={{ padding: '9px 9px 8px', borderRadius: 8, border: '1px solid var(--border-color, rgba(148,163,184,.14))', background: 'var(--panel-raised, rgba(148,163,184,.05))' }}>
+                  <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontSize: 12, lineHeight: 1.45 }}>{note.content}</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, marginTop: 7 }}>
+                    <small style={{ opacity: .55, fontSize: 10 }}>{formatTime(note.created_at)}</small>
+                    <button type="button" onClick={() => deleteSavedNote(note.id)} title={t.deleteNote} aria-label={t.deleteNote} style={{ border: 0, borderRadius: 5, padding: 4, background: 'transparent', color: '#fb7185', cursor: 'pointer', display: 'inline-flex' }}><Trash2 size={13}/></button>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
 
