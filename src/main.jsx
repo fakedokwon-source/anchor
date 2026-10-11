@@ -912,6 +912,16 @@ function App({
   const [unreadCounts, setUnreadCounts] =
     useState({});
 
+  const [browserNotificationsEnabled, setBrowserNotificationsEnabled] =
+    useState(() => localStorage.getItem('anchor-browser-notifications') === 'true');
+
+  const browserNotificationsEnabledRef = useRef(browserNotificationsEnabled);
+  const friendsRef = useRef(friends);
+  const languageRef = useRef(language);
+  browserNotificationsEnabledRef.current = browserNotificationsEnabled;
+  friendsRef.current = friends;
+  languageRef.current = language;
+
   const [blockedUsers, setBlockedUsers] =
     useState([]);
 
@@ -1018,6 +1028,47 @@ function App({
     window.setTimeout(() => {
       setToast('');
     }, 2200);
+  };
+
+
+  const toggleBrowserNotifications = async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      showToast(language === 'tr'
+        ? 'Bu tarayıcı bildirimleri desteklemiyor.'
+        : language === 'de'
+          ? 'Dieser Browser unterstützt keine Benachrichtigungen.'
+          : 'This browser does not support notifications.');
+      return;
+    }
+
+    if (browserNotificationsEnabled) {
+      setBrowserNotificationsEnabled(false);
+      localStorage.setItem('anchor-browser-notifications', 'false');
+      showToast(language === 'tr' ? 'Tarayıcı bildirimleri kapatıldı.' : language === 'de' ? 'Browser-Benachrichtigungen ausgeschaltet.' : 'Browser notifications turned off.');
+      return;
+    }
+
+    let permission = Notification.permission;
+    if (permission === 'default') {
+      try {
+        permission = await Notification.requestPermission();
+      } catch (error) {
+        console.error('Notification permission error:', error);
+      }
+    }
+
+    if (permission !== 'granted') {
+      showToast(language === 'tr'
+        ? 'Bildirim izni verilmedi. Tarayıcı ayarlarından izin ver.'
+        : language === 'de'
+          ? 'Keine Berechtigung. Bitte in den Browsereinstellungen erlauben.'
+          : 'Permission not granted. Allow notifications in your browser settings.');
+      return;
+    }
+
+    setBrowserNotificationsEnabled(true);
+    localStorage.setItem('anchor-browser-notifications', 'true');
+    showToast(language === 'tr' ? 'Tarayıcı bildirimleri açıldı.' : language === 'de' ? 'Browser-Benachrichtigungen eingeschaltet.' : 'Browser notifications enabled.');
   };
 
 
@@ -1576,6 +1627,32 @@ function App({
                     (current[newMessage.sender_id] || 0) + 1
                 })
               );
+
+              // Show a native browser notification only when the tab is in the background.
+              if (
+                browserNotificationsEnabledRef.current &&
+                document.hidden &&
+                'Notification' in window &&
+                Notification.permission === 'granted'
+              ) {
+                const sender = friendsRef.current.find(friend => friend.id === newMessage.sender_id);
+                const currentLanguage = languageRef.current;
+                const senderName = sender?.username || (currentLanguage === 'tr' ? 'Yeni mesaj' : currentLanguage === 'de' ? 'Neue Nachricht' : 'New message');
+                const notificationBody = newMessage.content || (currentLanguage === 'tr' ? 'Bir ek gönderdi.' : currentLanguage === 'de' ? 'Hat einen Anhang gesendet.' : 'Sent an attachment.');
+                try {
+                  const notice = new Notification(`@${senderName}`, {
+                    body: String(notificationBody).slice(0, 180),
+                    icon: '/anchor-logo.png',
+                    tag: `anchor-message-${newMessage.sender_id}`
+                  });
+                  notice.onclick = () => {
+                    window.focus();
+                    notice.close();
+                  };
+                } catch (notificationError) {
+                  console.error('Browser notification error:', notificationError);
+                }
+              }
 
               console.log(
                 'ANCHOR UNREAD COUNT UPDATED:',
@@ -3971,6 +4048,19 @@ function App({
               )}
 
             </div>
+
+            <button
+              type="button"
+              className="browser-notification-toggle"
+              onClick={toggleBrowserNotifications}
+              aria-pressed={browserNotificationsEnabled}
+            >
+              <span className="browser-notification-label">
+                <span className="browser-notification-title">{language === 'tr' ? 'Tarayıcı bildirimleri' : language === 'de' ? 'Browser-Benachrichtigungen' : 'Browser notifications'}</span>
+                <span className="browser-notification-description">{language === 'tr' ? 'Arka planda mesaj uyarısı' : language === 'de' ? 'Hinweise im Hintergrund' : 'Alerts while in background'}</span>
+              </span>
+              <span className={`browser-notification-switch ${browserNotificationsEnabled ? 'is-on' : ''}`} aria-hidden="true"><span /></span>
+            </button>
 
           </div>
 
