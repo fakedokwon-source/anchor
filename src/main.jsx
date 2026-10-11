@@ -395,6 +395,8 @@ const translations = {
     add: 'Add friend',
     empty: 'No results',
     welcomeBack: 'Welcome back',
+    selectFriendPrompt: 'Select a friend to start a conversation.',
+    supportContact: 'For support, contact @support. To speak with the administrator, contact @stablekwon.' ,
     logout: 'Logout',
     aboutDefault: 'No information yet.',
     save: 'Save',
@@ -475,6 +477,8 @@ const translations = {
     add: 'Arkadaş ekle',
     empty: 'Sonuç yok',
     welcomeBack: 'Tekrar hoş geldin',
+    selectFriendPrompt: 'Sohbete başlamak için bir arkadaş seç.',
+    supportContact: 'Destek için @support, yöneticiyle görüşmek için @stablekwon hesabıyla iletişime geçebilirsiniz.' ,
     logout: 'Çıkış yap',
     aboutDefault: 'Henüz bilgi yok.',
     save: 'Kaydet',
@@ -555,6 +559,8 @@ const translations = {
     add: 'Freund hinzufügen',
     empty: 'Keine Ergebnisse',
     welcomeBack: 'Willkommen zurück',
+    selectFriendPrompt: 'Wähle einen Freund aus, um ein Gespräch zu beginnen.',
+    supportContact: 'Für Support kontaktiere @support. Um mit der Administration zu sprechen, kontaktiere @stablekwon.' ,
     logout: 'Abmelden',
     aboutDefault: 'Noch keine Informationen.',
     save: 'Speichern',
@@ -4245,13 +4251,16 @@ function App({
               </h2>
 
               <p>
-                Select a friend to start
-                a conversation.
+                {t.selectFriendPrompt}
               </p>
 
               <div className="welcome-brand">
                 <Logo />
               </div>
+
+              <p style={{ marginTop: 18, maxWidth: 420, lineHeight: 1.6, fontSize: 13, opacity: 0.82, textAlign: 'center' }}>
+                {t.supportContact}
+              </p>
 
             </div>
 
